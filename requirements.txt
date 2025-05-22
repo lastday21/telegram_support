@@ -1,0 +1,7 @@
+python-telegram-bot==20.0
+pillow
+pytesseract
+mss
+keyboard
+requests
+python-dotenv

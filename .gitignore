@@ -1,0 +1,16 @@
+# IDE и кеш
+venv/
+.idea/
+__pycache__/
+
+# секреты
+.env
+config.json
+
+# большие бинарники
+Tesseract-OCR/
+dist/
+build/
+*.exe
+*.pkg
+*.ico
