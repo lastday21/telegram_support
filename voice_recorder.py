@@ -1,59 +1,56 @@
-
-import sounddevice as sd
-import wave
-import threading
+# voice_recorder.py
+# ──────────────────────────────────────────────────────────────
+# FFmpeg через shell=True, чтобы было проще с кавычками
+# Два dshow-инпута (stereo mix + mic) → amix → mono 16 kHz WAV
+# ──────────────────────────────────────────────────────────────
+import subprocess, signal
 from pathlib import Path
 from datetime import datetime
 
-SR = 16_000          # sample rate
-CH = 1               # mono
-SAMPLE_WIDTH = 2     # 16-bit
-
 class VoiceRecorder:
-    def __init__(self):
-        self._wf = None
-        self._stream = None
-        self._lock = threading.Lock()
-        self.filepath: Path | None = None
+    def __init__(self, mic_device: str, mix_device: str):
+        """
+        mic_device — точное имя микрофона, как его видит `ffmpeg -list_devices`
+        mix_device — точное имя «Стерео микшер», как его видит ffmpeg
+        """
+        self.mic = mic_device
+        self.mix = mix_device
+        self.proc = None
+        self.filepath = None
 
-    # callback для sounddevice
-    def _cb(self, in_data, frames, time_info, status):
-        if status:
-            print("sounddevice status:", status)
-        with self._lock:
-            if self._wf:
-                self._wf.writeframes(in_data)
-
-    # ─── публичные методы ────────────────────────────────
     def start(self):
-        """Начинает запись микрофона."""
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.filepath = Path(f"record_{ts}.wav")
+        out = Path(f"record_{ts}.wav")
+        self.filepath = out
 
-        # ⚠  str(self.filepath) — ключевой фикс
-        self._wf = wave.open(str(self.filepath), "wb")
-        self._wf.setnchannels(CH)
-        self._wf.setsampwidth(SAMPLE_WIDTH)
-        self._wf.setframerate(SR)
-
-        self._stream = sd.InputStream(
-            samplerate=SR,
-            channels=CH,
-            dtype="int16",
-            callback=self._cb,
+        # Формируем одну строку команды с кавычками внутри
+        cmd = (
+            f'ffmpeg -y -loglevel error '
+            f'-f dshow -i "audio={self.mix}" '
+            f'-f dshow -i "audio={self.mic}" '
+            f'-filter_complex amix=inputs=2:normalize=0 '
+            f'-ac 1 -ar 16000 "{out}"'
         )
-        self._stream.start()
-        print(f"🔴 REC start → {self.filepath}")
+        print("🔴 REC start →", out)
+        print("CMD:", cmd)
+
+        # shell=True чтобы Windows правильно распарсил кавычки
+        self.proc = subprocess.Popen(
+            cmd,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            shell=True
+        )
 
     def stop(self) -> Path:
-        """Заканчивает запись и возвращает путь к WAV-файлу."""
-        with self._lock:
-            if self._stream:
-                self._stream.stop()
-                self._stream.close()
-                self._stream = None
-            if self._wf:
-                self._wf.close()
-                self._wf = None
-        print("🛑 REC stop")
+        if not self.proc:
+            raise RuntimeError("Запись не запущена")
+        try:
+            # CTRL+BREAK надёжнее для FFmpeg
+            self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            print("[voice] FFmpeg не завершился, убиваем принудительно")
+            self.proc.kill()
+            self.proc.wait()
+        print("🛑 REC stop →", self.filepath)
         return self.filepath
