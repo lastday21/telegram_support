@@ -1,37 +1,27 @@
-# telegram_sender.py
-import json
-import requests
-from pathlib import Path
 
-# Читаем config.json, но defaultCaption может не быть
-_cfg = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
-BOT_TOKEN = _cfg["botToken"]
-CHAT_ID   = _cfg["chatID"]
-CAPTION   = _cfg.get("defaultCaption", "")  # ← здесь
+import requests
+from config import TG_BOT_TOKEN, TG_CHAT_ID
+
+DEFAULT_CAPTION = ""          # Можно задать TG_DEFAULT_CAPTION в .env
 
 def send_photo(photo_path: str, caption: str | None = None) -> None:
     """
-    Отправляет картинку в Telegram с подписью.
-    Если caption не указан — берётся из config.json → defaultCaption, или пустая строка.
+    Отправляет картинку в Telegram.
     """
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+    url  = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendPhoto"
     data = {
-        "chat_id": CHAT_ID,
-        "caption": caption if caption is not None else CAPTION
+        "chat_id": TG_CHAT_ID,
+        "caption": caption if caption is not None else DEFAULT_CAPTION
     }
     with open(photo_path, "rb") as img:
-        files = {"photo": img}
-        resp = requests.post(url, data=data, files=files, timeout=30)
+        resp = requests.post(url, data=data, files={"photo": img}, timeout=30)
         resp.raise_for_status()
+
 
 def send_message(text: str) -> None:
     """
     Отправляет текстовое сообщение в Telegram.
     """
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": text
-    }
-    resp = requests.post(url, data=data, timeout=30)
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    resp = requests.post(url, data={"chat_id": TG_CHAT_ID, "text": text}, timeout=30)
     resp.raise_for_status()

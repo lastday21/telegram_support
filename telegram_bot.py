@@ -1,52 +1,56 @@
-# telegram_bot.py
-import json
-from pathlib import Path
-
+# telegram_bot.py  (PTB 22.x)
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    CommandHandler,
-    MessageHandler,
-    filters
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    ContextTypes, filters
+)
+from telegram.request import HTTPXRequest
+from config import TG_BOT_TOKEN
+from ai_solver import solve_text
+from hotkey_listener import PROMPTS    # список Alt+1…9
+
+# 20-сек таймауты, этого достаточно
+request = HTTPXRequest(connect_timeout=20, read_timeout=20)
+
+app = (
+    ApplicationBuilder()
+    .token(TG_BOT_TOKEN)
+    .request(request)
+    .concurrent_updates(True)   # обрабатывать апдейты параллельно
+    .build()
 )
 
-from ai_solver import solve_text  # ваша функция для работы с чистым текстом
+HELP = (
+    "/help – эта справка\n"
+    "/prompts – список подсказок (Alt+1…9)\n"
+    "/p <n> – ответ по подсказке №n\n"
+    "Любой другой текст → ответ GPT."
+)
 
-# --- Загружаем настройки ---
-_cfg = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
-BOT_TOKEN = _cfg["botToken"]
+async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(HELP)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! Пришли мне условие задачи, а я верну ответ AI."
-    )
+async def cmd_prompts(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    txt = "\n".join(f"{i}. {p.splitlines()[0][:60]}…" for i, p in enumerate(PROMPTS, 1))
+    await update.message.reply_text(txt)
 
-async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
-    chat_id = update.effective_chat.id
-
-    # показываем пользователю, что бот обрабатывает
-    await context.bot.send_chat_action(chat_id, action="typing")
-
+async def cmd_p(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
-        answer = solve_text(user_text)
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка при обращении к AI: {e}")
+        n = int(ctx.args[0]); assert 1 <= n <= len(PROMPTS)
+    except (IndexError, ValueError, AssertionError):
+        await update.message.reply_text("Использование: /p <1-9>")
         return
+    await update.message.reply_text("⌛ Думаю…")
+    await update.message.reply_text(f"💡 {solve_text(PROMPTS[n-1])}")
 
-    await update.message.reply_text(answer)
+async def on_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⌛ Думаю…")
+    await update.message.reply_text(f"💡 {solve_text(update.message.text)}")
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+app.add_handler(CommandHandler(["start", "help"],   cmd_help))
+app.add_handler(CommandHandler("prompts",           cmd_prompts))
+app.add_handler(CommandHandler("p",                 cmd_p))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_msg))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(
-        MessageHandler(filters.TEXT & (~filters.COMMAND), on_message)
-    )
-
-    print("Telegram bot started. Press Ctrl+C to stop.")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+def main() -> None:
+    app.run_polling(stop_signals=[])   # блокирует поток
