@@ -1,61 +1,27 @@
-import os, sys
-
-# если мы запущены из PyInstaller, пути лежат в _MEIPASS
-base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-tesseract_dir = os.path.join(base_path, "Tesseract-OCR")
-
 
 import requests
-import pytesseract
-from PIL import Image
-from pathlib import Path
+from config import YC_API_KEY, YC_FOLDER_ID
 
 
-
-
-YC_API_KEY = os.getenv("YC_API_KEY")
-YC_FOLDER_ID = "b1gkuo48m02f6lf8ri8p"
-API_URL      = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-MODEL_URI    = f"gpt://{YC_FOLDER_ID}/yandexgpt/latest"
-HEADERS      = {
+API_URL   = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+MODEL_URI = f"gpt://{YC_FOLDER_ID}/yandexgpt/latest"
+HEADERS   = {
     "Authorization": f"Api-Key {YC_API_KEY}",
     "Content-Type":  "application/json"
 }
+DEFAULT_SYSTEM = (
+    "Ты помогаешь на mock-собеседовании: отвечай кратко, просто, "
+    "доступным языком, без лишней «воды»."
+)
 
-def solve_image(image_path: str, prompt: str) -> str:
-    # OCR
-    img = Image.open(Path(image_path))
-    text = pytesseract.image_to_string(img, lang="rus+eng", config="--oem 3 --psm 6").strip()
-    if not text:
-        return "Не удалось распознать текст."
-
-    # Собираем сообщения с фиксированным system и динамическим user=prompt
-    body = {
-        "modelUri": MODEL_URI,
-        "completionOptions": {"stream": False, "temperature": 0, "maxTokens": 400},
-        "messages": [
-            {"role": "system", "text": "ты на mock-собеседовании, должен просто и доступно объяснить решение"},
-            {"role": "user",   "text": f"{prompt}\n\n{text}"}
-        ]
-    }
-
-    resp = requests.post(API_URL, headers=HEADERS, json=body, timeout=120)
-    resp.raise_for_status()
-    return resp.json()["result"]["alternatives"][0]["message"]["text"].strip()
-
-def solve_text(user_text: str,
-               system_prompt: str = "ты на mock-собеседовании, должен просто и доступно объяснить решение") -> str:
-    """
-    Шлёт в Yandex GPT чистый текст (без OCR).
-    user_text — то, что пришло от пользователя.
-    system_prompt — роль/контекст для модели.
-    """
+# --- функции -----------------------------------------------------------------
+def _gpt_request(user_text: str, system_prompt: str, temperature: float = 0.3) -> str:
     body = {
         "modelUri": MODEL_URI,
         "completionOptions": {
             "stream": False,
-            "temperature": 0,
-            "maxTokens": 400
+            "temperature": temperature,
+            "maxTokens": 700
         },
         "messages": [
             {"role": "system", "text": system_prompt},
@@ -65,3 +31,41 @@ def solve_text(user_text: str,
     resp = requests.post(API_URL, headers=HEADERS, json=body, timeout=120)
     resp.raise_for_status()
     return resp.json()["result"]["alternatives"][0]["message"]["text"].strip()
+
+
+def solve_text(user_text: str,
+               system_prompt: str = DEFAULT_SYSTEM,
+               temperature: float = 0) -> str:
+    """
+    Отправляет чистый текст в Yandex GPT и возвращает ответ.
+    """
+    if len(user_text.strip()) < 3:
+        return "🤷 Не понял вопрос (текст слишком короткий)."
+    try:
+        return _gpt_request(user_text, system_prompt, temperature)
+    except Exception as e:
+        return f"🛑 Ошибка Yandex GPT: {e}"
+
+
+
+import pytesseract
+from PIL import Image
+from pathlib import Path
+
+def solve_image(image_path: str,
+                prompt: str = "Объясни задачу простыми словами") -> str:
+    """
+    Делает OCR картинки, конкатенирует prompt + извлечённый текст,
+    отправляет в Yandex GPT и возвращает ответ.
+    """
+    try:
+        img = Image.open(Path(image_path))
+        text = pytesseract.image_to_string(
+            img, lang="rus+eng", config="--oem 3 --psm 6"
+        ).strip()
+        if not text:
+            return "Не удалось распознать текст на изображении."
+        combined = f"{prompt}\n\n{text}"
+        return _gpt_request(combined, DEFAULT_SYSTEM)
+    except Exception as e:
+        return f"🛑 OCR/Yandex GPT error: {e}"

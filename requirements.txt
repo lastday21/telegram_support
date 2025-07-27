@@ -1,7 +1,9 @@
-python-telegram-bot==20.0
+python-telegram-bot
 pillow
 pytesseract
 mss
 keyboard
 requests
 python-dotenv
+sounddevice
+scipy
