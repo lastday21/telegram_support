@@ -3,7 +3,7 @@ import pathlib
 from dotenv import load_dotenv
 
 ROOT = pathlib.Path(__file__).resolve().parent
-ENV_PATH = ROOT / ".env"
+ENV_PATH =  ROOT.parent / ".env"
 if ENV_PATH.exists():
     load_dotenv(ENV_PATH, override=True)
 
