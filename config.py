@@ -1,22 +1,23 @@
-import os, sys, pathlib
+import os, pathlib
 from dotenv import load_dotenv
-
 
 ROOT = pathlib.Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH, override=True)
 
-if not ENV_PATH.exists():
-    sys.exit(f"[config] .env not found → {ENV_PATH}")
+def _require(name: str) -> str:
+    val = os.getenv(name)
+    if not val:
+        raise RuntimeError(
+            f"{name} не задан. "
+            "Скопируйте .env.example → .env и впишите ключи."
+        )
+    return val
 
-load_dotenv(ENV_PATH, override=True)
+YC_API_KEY   = _require("YC_API_KEY")
+YC_FOLDER_ID = _require("YC_FOLDER_ID")
+TG_BOT_TOKEN = _require("TG_BOT_TOKEN")
+TG_CHAT_ID   = _require("TG_CHAT_ID")
 
-# ─── ключи ────────────────────────────────────────────────
-YC_API_KEY   = os.getenv("YC_API_KEY")
-YC_FOLDER_ID = os.getenv("YC_FOLDER_ID")
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-TG_CHAT_ID   = os.getenv("TG_CHAT_ID")
 os.environ["YC_FOLDER_ID"] = YC_FOLDER_ID
-
-for var in ("YC_API_KEY", "YC_FOLDER_ID", "TG_BOT_TOKEN", "TG_CHAT_ID"):
-    if not globals()[var]:
-        sys.exit(f"[config] {var} не найден в .env")
