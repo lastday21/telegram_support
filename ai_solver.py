@@ -2,6 +2,9 @@ from io import BytesIO
 from typing import Union
 import requests
 from config import YC_API_KEY, YC_FOLDER_ID
+import pytesseract
+from PIL import Image
+from pathlib import Path
 
 
 API_URL   = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
@@ -48,10 +51,6 @@ def solve_text(user_text: str,
         return f"🛑 Ошибка Yandex GPT: {e}"
 
 
-
-import pytesseract
-from PIL import Image
-from pathlib import Path
 
 def solve_image(image: Union[str, bytes],
                 prompt: str = "Объясни задачу простыми словами") -> str:

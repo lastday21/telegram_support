@@ -1,4 +1,5 @@
-import os, pathlib
+import os
+import pathlib
 from dotenv import load_dotenv
 
 ROOT = pathlib.Path(__file__).resolve().parent

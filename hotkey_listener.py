@@ -9,7 +9,6 @@ from ai_solver        import solve_text, solve_image
 from telegram_sender  import send_message, send_photo
 from screenshot import take_screenshot
 from io import BytesIO
-import traceback
 
 
 FIXED_PROMPT = (

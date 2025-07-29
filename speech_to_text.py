@@ -6,19 +6,23 @@ speech_to_text.py
 •  ответ JSON → text
 """
 from pathlib import Path
-import wave, requests, io, struct
+import wave
+import requests
 from config import YC_API_KEY, YC_FOLDER_ID
 
 BASE_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 HEADERS  = {"Authorization": f"Api-Key {YC_API_KEY}"}
 DEBUG    = True
 def _log(*m):
-    if DEBUG: print("[speech]", *m)
+    if DEBUG:
+        print("[speech]", *m)
 
 def transcribe(wav_path: Path) -> str:
     # 1) читаем raw-сэмплы
     with wave.open(str(wav_path), "rb") as wf:
-        sr = wf.getframerate(); ch = wf.getnchannels(); sw = wf.getsampwidth()
+        sr = wf.getframerate()
+        ch = wf.getnchannels()
+        sw = wf.getsampwidth()
         if (sr, ch, sw) != (16000, 1, 2):
             raise RuntimeError("Нужно WAV 16 kHz mono 16-bit")
         raw = wf.readframes(wf.getnframes())

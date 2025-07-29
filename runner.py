@@ -1,4 +1,6 @@
-import threading, keyboard, traceback
+import threading
+import keyboard
+import traceback
 
 def run_hotkeys():
     try:
