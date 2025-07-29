@@ -1,4 +1,5 @@
-
+from io import BytesIO
+from typing import Union
 import requests
 from config import YC_API_KEY, YC_FOLDER_ID
 
@@ -52,14 +53,17 @@ import pytesseract
 from PIL import Image
 from pathlib import Path
 
-def solve_image(image_path: str,
+def solve_image(image: Union[str, bytes],
                 prompt: str = "Объясни задачу простыми словами") -> str:
     """
     Делает OCR картинки, конкатенирует prompt + извлечённый текст,
     отправляет в Yandex GPT и возвращает ответ.
     """
     try:
-        img = Image.open(Path(image_path))
+        if isinstance(image, bytes):
+            img = Image.open(BytesIO(image))
+        else:
+            img = Image.open(Path(image))
         text = pytesseract.image_to_string(
             img, lang="rus+eng", config="--oem 3 --psm 6"
         ).strip()

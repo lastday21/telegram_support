@@ -1,8 +1,5 @@
 import threading
 import keyboard
-from tempfile import NamedTemporaryFile
-from pathlib import Path
-from mss import mss
 from PIL import Image
 import pytesseract
 
@@ -10,6 +7,9 @@ from voice_recorder   import VoiceRecorder
 from speech_to_text   import transcribe
 from ai_solver        import solve_text, solve_image
 from telegram_sender  import send_message, send_photo
+from screenshot import take_screenshot
+from io import BytesIO
+import traceback
 
 
 FIXED_PROMPT = (
@@ -51,38 +51,37 @@ def _toggle_rec():
             send_message(f"🗣 Вы сказали:\n{text}")
             answer = solve_text(FIXED_PROMPT + text)
             send_message(f"💡 {answer}")
+
     except Exception:
         import traceback
         print("\n—— ERROR audio-module ———")
         traceback.print_exc()
         print("——————————————————————\n")
 
-def _take_screenshot() -> str:
-    with mss() as sct:
-        tmp = NamedTemporaryFile(suffix=".png", delete=False)
-        sct.shot(output=tmp.name)
-    return tmp.name
+    finally:
+        if wav and wav.exists():
+            wav.unlink(missing_ok=True)
 
 def _handler(prompt: str):
-    tmp = None
     try:
-        tmp = _take_screenshot()
-        send_photo(tmp, caption=prompt)
+        img_bytes = take_screenshot()
+        send_photo(img_bytes, caption=prompt)
+
         ocr_text = pytesseract.image_to_string(
-            Image.open(Path(tmp)), lang="rus+eng", config="--oem 3 --psm 6"
+            Image.open(BytesIO(img_bytes)), lang="rus+eng", config="--oem 3 --psm 6"
         ).strip()
+
+
         print("\n===== AI INPUT =====")
         print(prompt, ocr_text, sep="\n")
         print("===== END INPUT =====\n")
-        answer = solve_image(tmp, prompt)
+
+        answer = solve_image(img_bytes, prompt)
         send_message(answer)
-    except Exception:
+    except Exception as exc:
         import traceback
         traceback.print_exc()
-        send_message("🚨 ERROR screenshot-module")
-    finally:
-        if tmp and Path(tmp).exists():
-            Path(tmp).unlink()
+        send_message(f"🚨 ERROR screenshot-module: {exc}")
 
 # ──────────────────  Список промптов Alt+1…9  ─────────────────
 PROMPTS = [
