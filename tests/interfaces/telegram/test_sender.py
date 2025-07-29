@@ -13,7 +13,6 @@ def sender(monkeypatch):
     """Возвращает (module, call_dict) с «свежим» sender.py и мок-HTTP."""
     calls: dict[str, object] = {}
 
-
     fake_settings = types.ModuleType("settings")
     fake_settings.TG_BOT_TOKEN = "TOKEN123"
     fake_settings.TG_CHAT_ID = 777
@@ -33,8 +32,7 @@ def sender(monkeypatch):
     fake_requests.get = _fake_http
     sys.modules["requests"] = fake_requests
 
-
-    sys.modules.pop("src.interfaces.telegram.sender", None)   # ключевой сброс
+    sys.modules.pop("src.interfaces.telegram.sender", None)  # ключевой сброс
     mod = importlib.import_module("src.interfaces.telegram.sender")
 
     return mod, calls

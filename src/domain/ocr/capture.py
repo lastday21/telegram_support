@@ -78,6 +78,7 @@ def take_screenshot(
             }
         )
         png_bytes = tools.to_png(img.rgb, img.size)
+        assert png_bytes is not None
 
         # если нужен PNG ― сразу возвращаем
         if output_format == "png":

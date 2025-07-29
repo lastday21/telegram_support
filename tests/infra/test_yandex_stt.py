@@ -16,6 +16,7 @@ import src.infra.yandex_stt as stt
 # ---------- helpers --------------------------------------------------
 _FAKE_RAW = b"\x00\x01" * 100  # 200 байт PCM 16-бит
 
+
 class _FakeWave:
     """Контекст-менеджер, имитирующий wave.open()."""
 
@@ -23,16 +24,16 @@ class _FakeWave:
         self.ok = ok
 
     # ——— методы, которые вызывает transcribe() ———
-    def getframerate(self):      # 16 000 Гц
+    def getframerate(self):  # 16 000 Гц
         return 16000
 
-    def getnchannels(self):      # 1 канал или 2 (bad)
+    def getnchannels(self):  # 1 канал или 2 (bad)
         return 1 if self.ok else 2
 
-    def getsampwidth(self):      # 2 байта = 16-бит
+    def getsampwidth(self):  # 2 байта = 16-бит
         return 2
 
-    def getnframes(self):        # сколько «фреймов»
+    def getnframes(self):  # сколько «фреймов»
         return len(_FAKE_RAW) // 2
 
     def readframes(self, n):

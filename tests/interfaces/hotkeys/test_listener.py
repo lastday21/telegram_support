@@ -6,7 +6,6 @@ Unit-тесты для interfaces.hotkeys.listener.
     • _handler()     — скриншот, OCR, GPT, Telegram
 """
 
-
 import importlib
 import types
 import pytest
@@ -79,7 +78,6 @@ def listener(monkeypatch, tmp_path):
     monkeypatch.setattr(mod, "take_screenshot", _fake_take_screenshot)
     monkeypatch.setattr(mod, "Image", fake_pil_img)
     monkeypatch.setattr(mod, "pytesseract", fake_tess)
-
 
     mod._is_recording = False
 

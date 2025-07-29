@@ -75,7 +75,7 @@ def test_start_creates_process(recorder, fake_popen, tmp_path):
 
 def test_stop_terminates_process(recorder, fake_popen):
     """Recorder.stop() корректно завершает процесс и возвращает Path."""
-    recorder.start()            # создаём фэйковый процесс
+    recorder.start()  # создаём фэйковый процесс
     wav_path: Path = recorder.stop()
 
     # 1) wait() вызван

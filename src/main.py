@@ -1,14 +1,14 @@
 import threading
 import keyboard
 import traceback
-from interfaces.telegram import  bot
-from interfaces.hotkeys import listener
+
+from src.interfaces.telegram.bot import main as tg_main
+from src.interfaces.hotkeys.listener import main as hk_main
 
 
 def run_hotkeys():
     try:
-
-        listener.main()  # блокирует поток
+        hk_main()
     except Exception:
         traceback.print_exc()
 
@@ -17,7 +17,7 @@ threading.Thread(target=run_hotkeys, daemon=True).start()
 
 try:
 
-    bot.main()  # блокирует процесс
+    tg_main()
 except Exception:
     traceback.print_exc()
     print("Бот не запустился. Хоткеи работают, закрой окно для выхода.")

@@ -7,7 +7,6 @@
 тесты работали оффлайн и быстро.
 """
 
-
 import types
 import src.infra.yandex_gpt as gpt
 
@@ -34,9 +33,9 @@ def test_solve_text_calls_gpt(monkeypatch):
     assert out == "ANSWER" and "args" in call
 
 
-
 class _FakeImg:
     """Минимальный объект, передаваемый в pytesseract.image_to_string."""
+
     pass
 
 
@@ -51,7 +50,6 @@ def test_solve_image_success(monkeypatch):
 
     monkeypatch.setattr(gpt, "Image", types.SimpleNamespace(open=_fake_open))
 
-
     def _fake_ocr(img, lang, config):
         calls["ocr_called"] = True
         return "SELECT * FROM table;"
@@ -61,7 +59,6 @@ def test_solve_image_success(monkeypatch):
         "pytesseract",
         types.SimpleNamespace(image_to_string=_fake_ocr),
     )
-
 
     def _fake_req(user_text, system_prompt, temperature=0.3):
         calls["prompt"] = user_text
@@ -90,7 +87,4 @@ def test_solve_image_no_text(monkeypatch):
         types.SimpleNamespace(image_to_string=lambda *a, **kw: ""),
     )
 
-    assert (
-        gpt.solve_image(b"bytes")
-        == "Не удалось распознать текст на изображении."
-    )
+    assert gpt.solve_image(b"bytes") == "Не удалось распознать текст на изображении."

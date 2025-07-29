@@ -25,19 +25,20 @@ class VoiceRecorder:
         print("🔴 REC start →", out)
         print("CMD:", cmd)
 
-        # открываем stdin, чтобы посылать 'q'
         self.proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE)
 
     def stop(self) -> Path:
         if not self.proc:
             raise RuntimeError("Запись не запущена")
         try:
-            # отправляем FFmpeg команду 'q' для graceful exit
+            assert self.proc.stdin is not None, "stdin был None"
+
             self.proc.stdin.write(b"q")
             self.proc.stdin.flush()
         except Exception as e:
             print("[voice] Не удалось послать 'q' в FFmpeg:", e)
-        # ждём завершения (долго не надо)
+
         self.proc.wait(timeout=5)
         print("🛑 REC stop →", self.filepath)
+        assert self.filepath is not None
         return self.filepath

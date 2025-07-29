@@ -15,11 +15,12 @@ def send_photo(photo: Union[str, bytes, BinaryIO], caption: str | None = None) -
         "caption": caption if caption is not None else DEFAULT_CAPTION,
     }
     if isinstance(photo, bytes):
-        files = {"photo": ("shot.png", photo)}
+        files: dict[str, tuple[str, bytes]] = {"photo": ("shot.png", photo)}
     elif isinstance(photo, str):
-        files = {"photo": open(photo, "rb")}
+        with open(photo, "rb") as fh:
+            files = {"photo": ("shot.png", fh.read())}
     else:
-        files = {"photo": photo}
+        files = {"photo": ("shot.png", photo.read())}
 
     resp = requests.post(url, data=data, files=files, timeout=30)
     resp.raise_for_status()

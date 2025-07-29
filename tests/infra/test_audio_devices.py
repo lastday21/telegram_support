@@ -14,7 +14,7 @@ def fake_ffmpeg(monkeypatch):
     """
     body = {
         "text": (
-            '[dshow @ 000] DirectShow audio devices\n'
+            "[dshow @ 000] DirectShow audio devices\n"
             '  "Микрофон (audio)"\n'
             '  "Стерео микшер (audio)"\n'
         )
@@ -48,5 +48,3 @@ def test_no_mixer_error(fake_ffmpeg):
         '  "Микрофон (audio)"\n',  # ← две пробелы перед кавычкой
         "",
     )
-
-
