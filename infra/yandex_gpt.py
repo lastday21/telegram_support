@@ -1,22 +1,20 @@
 from io import BytesIO
 from typing import Union
 import requests
-from config import YC_API_KEY, YC_FOLDER_ID
+from settings import YC_API_KEY, YC_FOLDER_ID
 import pytesseract
 from PIL import Image
 from pathlib import Path
 
 
-API_URL   = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+API_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 MODEL_URI = f"gpt://{YC_FOLDER_ID}/yandexgpt-lite/latest"
-HEADERS   = {
-    "Authorization": f"Api-Key {YC_API_KEY}",
-    "Content-Type":  "application/json"
-}
+HEADERS = {"Authorization": f"Api-Key {YC_API_KEY}", "Content-Type": "application/json"}
 DEFAULT_SYSTEM = (
     "Ты помогаешь на mock-собеседовании: отвечай кратко, просто, "
     "доступным языком, без лишней «воды»."
 )
+
 
 # --- функции -----------------------------------------------------------------
 def _gpt_request(user_text: str, system_prompt: str, temperature: float = 0.3) -> str:
@@ -25,21 +23,21 @@ def _gpt_request(user_text: str, system_prompt: str, temperature: float = 0.3) -
         "completionOptions": {
             "stream": False,
             "temperature": temperature,
-            "maxTokens": 700
+            "maxTokens": 700,
         },
         "messages": [
             {"role": "system", "text": system_prompt},
-            {"role": "user",   "text": user_text}
-        ]
+            {"role": "user", "text": user_text},
+        ],
     }
     resp = requests.post(API_URL, headers=HEADERS, json=body, timeout=120)
     resp.raise_for_status()
     return resp.json()["result"]["alternatives"][0]["message"]["text"].strip()
 
 
-def solve_text(user_text: str,
-               system_prompt: str = DEFAULT_SYSTEM,
-               temperature: float = 0) -> str:
+def solve_text(
+    user_text: str, system_prompt: str = DEFAULT_SYSTEM, temperature: float = 0
+) -> str:
     """
     Отправляет чистый текст в Yandex GPT и возвращает ответ.
     """
@@ -51,9 +49,9 @@ def solve_text(user_text: str,
         return f"🛑 Ошибка Yandex GPT: {e}"
 
 
-
-def solve_image(image: Union[str, bytes],
-                prompt: str = "Объясни задачу простыми словами") -> str:
+def solve_image(
+    image: Union[str, bytes], prompt: str = "Объясни задачу простыми словами"
+) -> str:
     """
     Делает OCR картинки, конкатенирует prompt + извлечённый текст,
     отправляет в Yandex GPT и возвращает ответ.

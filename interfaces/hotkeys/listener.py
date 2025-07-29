@@ -4,18 +4,17 @@ from PIL import Image
 import pytesseract
 import os
 
-from voice_recorder   import VoiceRecorder
-from speech_to_text   import transcribe
-from ai_solver        import solve_text, solve_image
-from telegram_sender  import send_message, send_photo
-from screenshot import take_screenshot
+from domain.audio.recorder import VoiceRecorder
+from infra.yandex_stt import transcribe
+from infra.yandex_gpt import solve_text, solve_image
+from interfaces.telegram.sender import send_message, send_photo
+from domain.ocr.capture import take_screenshot
 from io import BytesIO
-from audio_devices import pick_default_devices
+from infra.audio_devices import pick_default_devices
 
 
-FIXED_PROMPT = (
-    "Я на мок-собеседовании, расскажи максимально подробно про следующую тему/напиши код: "
-)
+FIXED_PROMPT = "Я на мок-собеседовании, расскажи максимально подробно про следующую тему/напиши код: "
+
 
 def _resolve_devices() -> tuple[str, str]:
     """Берём устройства из ENV, а если их нет — ищем автоматически."""
@@ -24,6 +23,7 @@ def _resolve_devices() -> tuple[str, str]:
     if mic_env and mix_env:
         return mic_env, mix_env
     return pick_default_devices()
+
 
 MIC_DEVICE, MIX_DEVICE = _resolve_devices()
 _rec = VoiceRecorder(mic_device=MIC_DEVICE, mix_device=MIX_DEVICE)
@@ -41,6 +41,7 @@ _rec = VoiceRecorder(mic_device=MIC_DEVICE, mix_device=MIX_DEVICE)
 #     mix_device="Стерео микшер (Realtek(R) Audio)",
 # )
 _is_recording = False
+
 
 def _toggle_rec():
     global _is_recording
@@ -65,14 +66,15 @@ def _toggle_rec():
 
     except Exception:
         import traceback
+
         print("\n—— ERROR audio-module ———")
         traceback.print_exc()
         print("——————————————————————\n")
 
-
     finally:
         if wav is not None and wav.exists():
             wav.unlink(missing_ok=True)
+
 
 def _handler(prompt: str):
     try:
@@ -83,7 +85,6 @@ def _handler(prompt: str):
             Image.open(BytesIO(img_bytes)), lang="rus+eng", config="--oem 3 --psm 6"
         ).strip()
 
-
         print("\n===== AI INPUT =====")
         print(prompt, ocr_text, sep="\n")
         print("===== END INPUT =====\n")
@@ -92,8 +93,10 @@ def _handler(prompt: str):
         send_message(answer)
     except Exception as exc:
         import traceback
+
         traceback.print_exc()
         send_message(f"🚨 ERROR screenshot-module: {exc}")
+
 
 # ──────────────────  Список промптов Alt+1…9  ─────────────────
 PROMPTS = [
@@ -118,25 +121,26 @@ PROMPTS = [
     """Я получил задачу на мок-интервью по бэкенду питона в Яндекс. Мне нужно краткое описание решения по пунктам, напиши текстом. 
 Как бы ты его рассказал, напиши это текстом., только без сложных конструкций. попроще""",
     """Я получил задачу на мок-интервью по бэкенду питона в Яндекс. напиши только полное решение и комментарии к нему, только без сложных конструкций. попроще.""",
-    """Я получил задачу на мок-интервью по бэкенду питона в Яндекс. напиши только полное решение без комментариев, только без сложных конструкций. попроще."""
+    """Я получил задачу на мок-интервью по бэкенду питона в Яндекс. напиши только полное решение без комментариев, только без сложных конструкций. попроще.""",
 ]
+
 
 # ──────────────────── Регистрация хоткеев ────────────────────
 def main():
     print("Готово!  Alt+Q — аудио,  Alt+1…Alt+9 — скриншот + GPT")
 
     keyboard.add_hotkey(
-        "alt+q",
-        lambda: threading.Thread(target=_toggle_rec, daemon=True).start()
+        "alt+q", lambda: threading.Thread(target=_toggle_rec, daemon=True).start()
     )
     for i, prm in enumerate(PROMPTS, start=1):
         keyboard.add_hotkey(
             f"alt+{i}",
             lambda p=prm: threading.Thread(
                 target=_handler, args=(p,), daemon=True
-            ).start()
+            ).start(),
         )
     keyboard.wait()
+
 
 if __name__ == "__main__":
     main()

@@ -3,7 +3,7 @@
 """
 
 from __future__ import annotations
-
+from typing import Optional
 import re
 import subprocess
 from functools import lru_cache
@@ -26,7 +26,7 @@ def list_audio_devices() -> list[str]:
     proc = subprocess.run(
         _DSHOW_CMD,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,       # нужен stderr
+        stderr=subprocess.PIPE,  # нужен stderr
         check=False,
     )
 
@@ -49,8 +49,8 @@ def pick_default_devices() -> tuple[str, str]:
     mix  — строка, содержащая «stereo mix» или оба слова «стерео» и «микшер»
     """
     devs = list_audio_devices()
-
-    # fallback: если устройств ровно два и одно из них содержит 'mix' ― берём их
+    mix: Optional[str] = None
+    mic: Optional[str] = None
     if len(devs) == 2 and any("mix" in d.lower() for d in devs):
         mic, mix = devs
         if "mix" in mic.lower():

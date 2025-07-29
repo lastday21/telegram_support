@@ -1,18 +1,18 @@
 from typing import Union, BinaryIO
 import requests
-from config import TG_BOT_TOKEN, TG_CHAT_ID
+from settings import TG_BOT_TOKEN, TG_CHAT_ID
 
-DEFAULT_CAPTION = ""          # Можно задать TG_DEFAULT_CAPTION в .env
+DEFAULT_CAPTION = ""  # Можно задать TG_DEFAULT_CAPTION в .env
 
-def send_photo(photo: Union[str, bytes, BinaryIO],
-               caption: str | None = None) -> None:
+
+def send_photo(photo: Union[str, bytes, BinaryIO], caption: str | None = None) -> None:
     """
     Отправляет картинку в Telegram.
     """
-    url  = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendPhoto"
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendPhoto"
     data = {
         "chat_id": TG_CHAT_ID,
-        "caption": caption if caption is not None else DEFAULT_CAPTION
+        "caption": caption if caption is not None else DEFAULT_CAPTION,
     }
     if isinstance(photo, bytes):
         files = {"photo": ("shot.png", photo)}

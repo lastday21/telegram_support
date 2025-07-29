@@ -3,17 +3,21 @@
 •  POST /speech/v1/stt:recognize?...  (query-params)
 •  ответ JSON → text
 """
+
 from pathlib import Path
 import wave
 import requests
-from config import YC_API_KEY, YC_FOLDER_ID
+from settings import YC_API_KEY, YC_FOLDER_ID
 
 BASE_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
-HEADERS  = {"Authorization": f"Api-Key {YC_API_KEY}"}
-DEBUG    = True
+HEADERS = {"Authorization": f"Api-Key {YC_API_KEY}"}
+DEBUG = True
+
+
 def _log(*m):
     if DEBUG:
         print("[speech]", *m)
+
 
 def transcribe(wav_path: Path) -> str:
     # 1) читаем raw-сэмплы
@@ -27,10 +31,10 @@ def transcribe(wav_path: Path) -> str:
 
     # 2) собираем URL с query-параметрами
     params = {
-        "folderId":         YC_FOLDER_ID,
-        "lang":             "ru-RU",
-        "format":           "lpcm",
-        "sampleRateHertz":  "16000",
+        "folderId": YC_FOLDER_ID,
+        "lang": "ru-RU",
+        "format": "lpcm",
+        "sampleRateHertz": "16000",
     }
     url = BASE_URL + "?" + "&".join(f"{k}={v}" for k, v in params.items())
 

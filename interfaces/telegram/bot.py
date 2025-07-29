@@ -4,6 +4,7 @@
 OCR-анализ скриншота и т. д.) в фоновом потоке, не блокируя
 асинхронный event-loop библиотеки **python-telegram-bot**.
 """
+
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,9 +15,9 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-from config import TG_BOT_TOKEN
-from ai_solver import solve_text
-from hotkey_listener import PROMPTS  # список Alt+1…9
+from settings import TG_BOT_TOKEN
+from infra.yandex_gpt import solve_text
+from interfaces.hotkeys.listener import PROMPTS  # список Alt+1…9
 
 
 request = HTTPXRequest(connect_timeout=20, read_timeout=20)
@@ -47,9 +48,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_prompts(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """/prompts — заголовки всех пресетов Alt+1…9."""
-    txt = "\n".join(
-        f"{i}. {p.splitlines()[0][:60]}…" for i, p in enumerate(PROMPTS, 1)
-    )
+    txt = "\n".join(f"{i}. {p.splitlines()[0][:60]}…" for i, p in enumerate(PROMPTS, 1))
     await update.message.reply_text(txt)
 
 
@@ -69,7 +68,6 @@ async def cmd_p(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"{BULB}{answer}")
 
 
-
 async def on_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Отправляет произвольный текст пользователя в GPT."""
     await update.message.reply_text(THINKING)
@@ -78,12 +76,10 @@ async def on_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"{BULB}{answer}")
 
 
-
 app.add_handler(CommandHandler(["start", "help"], cmd_help))
 app.add_handler(CommandHandler("prompts", cmd_prompts))
 app.add_handler(CommandHandler("p", cmd_p))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_msg))
-
 
 
 def main() -> None:

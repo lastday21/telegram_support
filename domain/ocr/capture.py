@@ -69,12 +69,14 @@ def take_screenshot(
 
         # --------- СНИМОК ОБЛАСТИ / MULTI-MON ---------
         # grab() → raw RGB; сохраняем в PNG, затем при нужде конвертируем через Pillow
-        img = sct.grab({
-            "left": region[0],
-            "top": region[1],
-            "width": region[2],
-            "height": region[3],
-        })
+        img = sct.grab(
+            {
+                "left": region[0],
+                "top": region[1],
+                "width": region[2],
+                "height": region[3],
+            }
+        )
         png_bytes = tools.to_png(img.rgb, img.size)
 
         # если нужен PNG ― сразу возвращаем
@@ -83,6 +85,7 @@ def take_screenshot(
 
         # иначе переконвертируем (JPG/BMP)
         from PIL import Image
+
         with Image.open(BytesIO(png_bytes)) as im, BytesIO() as buf:
             im.save(buf, format=output_format.upper())
             return buf.getvalue()
