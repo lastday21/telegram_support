@@ -1,6 +1,4 @@
 """
-speech_to_text.py
-───────────────────────────────────────────────────────────
 • 16 kHz mono WAV  →  raw-PCM bytes
 •  POST /speech/v1/stt:recognize?...  (query-params)
 •  ответ JSON → text

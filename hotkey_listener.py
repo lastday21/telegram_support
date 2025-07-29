@@ -2,6 +2,7 @@ import threading
 import keyboard
 from PIL import Image
 import pytesseract
+import os
 
 from voice_recorder   import VoiceRecorder
 from speech_to_text   import transcribe
@@ -9,30 +10,41 @@ from ai_solver        import solve_text, solve_image
 from telegram_sender  import send_message, send_photo
 from screenshot import take_screenshot
 from io import BytesIO
+from audio_devices import pick_default_devices
 
 
 FIXED_PROMPT = (
     "Я на мок-собеседовании, расскажи максимально подробно про следующую тему/напиши код: "
 )
 
-# FFmpeg-имена устройств точно из вывода `ffmpeg -list_devices`
-MIC_DEVICE = (
-    "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\"
-    "wave_{EBB798E2-2326-4DC4-A40F-5BD075C42CDC}"
-)
-MIX_DEVICE = (
-    "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\"
-    "wave_{108367BD-4575-4D6D-9B91-5AF7AF0FBEA9}"
-)
+def _resolve_devices() -> tuple[str, str]:
+    """Берём устройства из ENV, а если их нет — ищем автоматически."""
+    mic_env = os.getenv("MIC_DEVICE")
+    mix_env = os.getenv("MIX_DEVICE")
+    if mic_env and mix_env:
+        return mic_env, mix_env
+    return pick_default_devices()
 
-_rec = VoiceRecorder(
-    mic_device = 'Микрофон (Realtek(R) Audio)',
-    mix_device = 'Стерео микшер (Realtek(R) Audio)'
-)
+MIC_DEVICE, MIX_DEVICE = _resolve_devices()
+_rec = VoiceRecorder(mic_device=MIC_DEVICE, mix_device=MIX_DEVICE)
+# MIC_DEVICE = (
+#     "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\"
+#     "wave_{EBB798E2-2326-4DC4-A40F-5BD075C42CDC}"
+# )
+# MIX_DEVICE = (
+#     "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\"
+#     "wave_{108367BD-4575-4D6D-9B91-5AF7AF0FBEA9}"
+# )
+#
+# _rec = VoiceRecorder(
+#     mic_device="Набор микрофонов (Технология Intel® Smart Sound для цифровых микрофонов)",
+#     mix_device="Стерео микшер (Realtek(R) Audio)",
+# )
 _is_recording = False
 
 def _toggle_rec():
     global _is_recording
+    wav = None
     try:
         if not _is_recording:
             _rec.start()
@@ -57,8 +69,9 @@ def _toggle_rec():
         traceback.print_exc()
         print("——————————————————————\n")
 
+
     finally:
-        if wav and wav.exists():
+        if wav is not None and wav.exists():
             wav.unlink(missing_ok=True)
 
 def _handler(prompt: str):

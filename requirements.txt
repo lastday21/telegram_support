@@ -1,9 +1,8 @@
-python-telegram-bot
-pillow
-pytesseract
-mss
-keyboard
-requests
-python-dotenv
-sounddevice
-scipy
+sounddevice~=0.5.2
+python-dotenv~=1.1.0
+keyboard~=0.13.5
+requests~=2.32.3
+pytesseract~=0.3.13
+pillow~=11.2.1
+mss~=10.0.0
+python-telegram-bot~=22.1
