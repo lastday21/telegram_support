@@ -39,11 +39,6 @@ def take_screenshot(
     -------
     bytes
         Байтовое содержимое PNG/JPEG/BMP–файла.
-
-    Исключения
-    ----------
-    ValueError
-        Если `output_format` не поддерживается.
     """
     if output_format not in {"png", "jpg", "bmp"}:
         raise ValueError("output_format должен быть 'png', 'jpg' или 'bmp'")

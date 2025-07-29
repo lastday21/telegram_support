@@ -2,7 +2,7 @@ from typing import Union, BinaryIO
 import requests
 from src.settings import TG_BOT_TOKEN, TG_CHAT_ID
 
-DEFAULT_CAPTION = ""  # Можно задать TG_DEFAULT_CAPTION в .env
+DEFAULT_CAPTION = ""
 
 
 def send_photo(photo: Union[str, bytes, BinaryIO], caption: str | None = None) -> None:

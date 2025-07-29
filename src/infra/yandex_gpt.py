@@ -11,7 +11,7 @@ API_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 MODEL_URI = f"gpt://{YC_FOLDER_ID}/yandexgpt-lite/latest"
 HEADERS = {"Authorization": f"Api-Key {YC_API_KEY}", "Content-Type": "application/json"}
 DEFAULT_SYSTEM = (
-    "Ты помогаешь на mock-собеседовании: отвечай кратко, просто, "
+    "Ты помогаешь: отвечай кратко, просто, "
     "доступным языком, без лишней «воды»."
 )
 

@@ -17,7 +17,7 @@ import asyncio
 
 from src.settings import TG_BOT_TOKEN
 from src.infra.yandex_gpt import solve_text
-from src.interfaces.hotkeys.listener import PROMPTS  # список Alt+1…9
+from src.interfaces.hotkeys.listener import PROMPTS
 
 request = HTTPXRequest(connect_timeout=20, read_timeout=20)
 app = ApplicationBuilder().token(TG_BOT_TOKEN).request(request).build()
