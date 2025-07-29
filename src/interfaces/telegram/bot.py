@@ -15,9 +15,9 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-from settings import TG_BOT_TOKEN
-from infra.yandex_gpt import solve_text
-from interfaces.hotkeys.listener import PROMPTS  # список Alt+1…9
+from src.settings import TG_BOT_TOKEN
+from src.infra.yandex_gpt import solve_text
+from src.interfaces.hotkeys.listener import PROMPTS  # список Alt+1…9
 
 
 request = HTTPXRequest(connect_timeout=20, read_timeout=20)

@@ -1,6 +1,6 @@
 from typing import Union, BinaryIO
 import requests
-from settings import TG_BOT_TOKEN, TG_CHAT_ID
+from src.settings import TG_BOT_TOKEN, TG_CHAT_ID
 
 DEFAULT_CAPTION = ""  # Можно задать TG_DEFAULT_CAPTION в .env
 

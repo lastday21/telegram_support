@@ -4,13 +4,13 @@ from PIL import Image
 import pytesseract
 import os
 
-from domain.audio.recorder import VoiceRecorder
-from infra.yandex_stt import transcribe
-from infra.yandex_gpt import solve_text, solve_image
-from interfaces.telegram.sender import send_message, send_photo
-from domain.ocr.capture import take_screenshot
+from src.domain.audio.recorder import VoiceRecorder
+from src.infra.yandex_stt import transcribe
+from src.infra.yandex_gpt import solve_text, solve_image
+from src.interfaces.telegram.sender import send_message, send_photo
+from src.domain.ocr.capture import take_screenshot
 from io import BytesIO
-from infra.audio_devices import pick_default_devices
+from src.infra.audio_devices import pick_default_devices
 
 
 FIXED_PROMPT = "Я на мок-собеседовании, расскажи максимально подробно про следующую тему/напиши код: "

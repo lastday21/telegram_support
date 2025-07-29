@@ -7,7 +7,7 @@
 from pathlib import Path
 import wave
 import requests
-from settings import YC_API_KEY, YC_FOLDER_ID
+from src.settings import YC_API_KEY, YC_FOLDER_ID
 
 BASE_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 HEADERS = {"Authorization": f"Api-Key {YC_API_KEY}"}

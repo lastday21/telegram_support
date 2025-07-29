@@ -1,7 +1,7 @@
 from io import BytesIO
 from typing import Union
 import requests
-from settings import YC_API_KEY, YC_FOLDER_ID
+from src.settings import YC_API_KEY, YC_FOLDER_ID
 import pytesseract
 from PIL import Image
 from pathlib import Path
