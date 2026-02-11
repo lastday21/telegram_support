@@ -2,121 +2,97 @@
 Unit-тесты для interfaces.hotkeys.listener.
 
 Покрываем:
-    • _toggle_rec()  — сначала start → затем stop
-    • _handler()     — скриншот, OCR, GPT, Telegram
+    • handle_audio_hotkey_press()      — сначала start → затем stop
+    • handle_screenshot_hotkey_press() — скриншот, GPT и Telegram
 """
 
 import importlib
-import types
 import pytest
 
 
-# ---------------------------------------------------------------------
 @pytest.fixture
 def listener(monkeypatch, tmp_path):
-    """
-    Импортируем модуль и подменяем все внешние зависимости на заглушки.
-    Возвращаем (mod, ctx), где ctx — словарь со счётчиками вызовов/аргументов.
-    """
-    ctx = {
-        "rec_started": False,
-        "rec_stopped": False,
+    call_state = {
+        "recording_started": False,
+        "recording_stopped": False,
         "messages": [],
         "photos": [],
-        "solve_text": [],
-        "solve_image": [],
+        "solve_text_calls": [],
+        "solve_image_calls": [],
     }
 
-    # --------- Fake VoiceRecorder ------------------------------------
-    class _FakeRec:
+    class FakeVoiceRecorder:
         def __init__(self):
-            self.wav = tmp_path / "fake.wav"
-            self.wav.write_bytes(b"RIFF....WAVEfmt")  # псевдо-файл
+            self.output_file_path = tmp_path / "fake.wav"
+            self.output_file_path.write_bytes(b"RIFF....WAVEfmt")
 
         def start(self):
-            ctx["rec_started"] = True
+            call_state["recording_started"] = True
 
         def stop(self):
-            ctx["rec_stopped"] = True
-            return self.wav
+            call_state["recording_stopped"] = True
+            return self.output_file_path
 
-    # --------- Fake Telegram ----------------------------------------
-    def _fake_send_msg(txt):
-        ctx["messages"].append(txt)
+    def fake_send_message(text):
+        call_state["messages"].append(text)
 
-    def _fake_send_photo(photo, caption=None):
-        ctx["photos"].append((photo, caption))
+    def fake_send_photo(photo, caption=None):
+        call_state["photos"].append((photo, caption))
 
-    # --------- Fake STT / GPT ---------------------------------------
-    def _fake_transcribe(wav):
+    def fake_transcribe(_audio_file_path):
         return "hello world"
 
-    def _fake_solve_text(text):
-        ctx["solve_text"].append(text)
-        return "AI ANSWER"
+    def fake_solve_text(text):
+        call_state["solve_text_calls"].append(text)
+        return "ANSWER"
 
-    def _fake_solve_image(img, prompt):
-        ctx["solve_image"].append((img, prompt))
-        return "IMG ANSWER"
+    def fake_solve_image(image, prompt):
+        call_state["solve_image_calls"].append((image, prompt))
+        return "IMAGE ANSWER"
 
-    # --------- Fake screenshot & OCR --------------------------------
-    def _fake_take_screenshot(*a, **kw):
+    def fake_take_screenshot(*_args, **_kwargs):
         return b"PNG_BYTES"
 
-    fake_pil_img = types.SimpleNamespace(open=lambda buf: object())
-    fake_tess = types.SimpleNamespace(image_to_string=lambda *a, **k: "OCR TEXT")
+    listener_module = importlib.import_module("src.interfaces.hotkeys.listener")
 
-    # --------- Импортируем модуль и ставим моки ----------------------
-    mod = importlib.import_module("src.interfaces.hotkeys.listener")
+    monkeypatch.setattr(listener_module, "voice_recorder", FakeVoiceRecorder())
+    monkeypatch.setattr(listener_module, "send_message", fake_send_message)
+    monkeypatch.setattr(listener_module, "send_photo", fake_send_photo)
+    monkeypatch.setattr(listener_module, "transcribe", fake_transcribe)
+    monkeypatch.setattr(listener_module, "solve_text", fake_solve_text)
+    monkeypatch.setattr(listener_module, "solve_image", fake_solve_image)
+    monkeypatch.setattr(listener_module, "take_screenshot", fake_take_screenshot)
 
-    monkeypatch.setattr(mod, "_rec", _FakeRec())
-    monkeypatch.setattr(mod, "send_message", _fake_send_msg)
-    monkeypatch.setattr(mod, "send_photo", _fake_send_photo)
-    monkeypatch.setattr(mod, "transcribe", _fake_transcribe)
-    monkeypatch.setattr(mod, "solve_text", _fake_solve_text)
-    monkeypatch.setattr(mod, "solve_image", _fake_solve_image)
-    monkeypatch.setattr(mod, "take_screenshot", _fake_take_screenshot)
-    monkeypatch.setattr(mod, "Image", fake_pil_img)
-    monkeypatch.setattr(mod, "pytesseract", fake_tess)
+    listener_module.is_recording_audio = False
 
-    mod._is_recording = False
-
-    return mod, ctx
+    return listener_module, call_state
 
 
-# ---------------------------------------------------------------------
 def test_toggle_rec_start_and_stop(listener):
-    """Первый вызов _toggle_rec() запускает запись, второй — останавливает."""
-    mod, ctx = listener
+    listener_module, call_state = listener
 
-    # ---- старт записи ----
-    mod._toggle_rec()
-    assert ctx["rec_started"] is True
-    assert mod._is_recording is True
-    # Никаких сообщений пока не должно быть
-    assert ctx["messages"] == []
+    listener_module.handle_audio_hotkey_press()
+    assert call_state["recording_started"] is True
+    assert listener_module.is_recording_audio is True
+    assert call_state["messages"] == []
 
-    # ---- стоп записи ----
-    mod._toggle_rec()
-    assert ctx["rec_stopped"] is True
-    assert mod._is_recording is False
-    # Должны прилететь 2 сообщения: «вы сказали …» и ответ GPT
-    assert len(ctx["messages"]) == 2
-    assert ctx["messages"][0].startswith("🗣 Вы сказали:")
-    assert ctx["messages"][1].startswith("💡")
-    # solve_text получил объединённый prompt
-    assert ctx["solve_text"] and "hello world" in ctx["solve_text"][0]
+    listener_module.handle_audio_hotkey_press()
+    assert call_state["recording_stopped"] is True
+    assert listener_module.is_recording_audio is False
+    assert len(call_state["messages"]) == 2
+    assert call_state["messages"][0].startswith("🗣 Вы сказали:")
+    assert call_state["messages"][1].startswith("💡")
+    assert call_state["solve_text_calls"]
+    assert "hello world" in call_state["solve_text_calls"][0]
 
 
 def test_handler_screenshot_flow(listener):
-    """_handler() делает скриншот → отправляет фото → GPT-ответ текстом."""
-    mod, ctx = listener
+    listener_module, call_state = listener
 
-    mod._handler("PROMPT_X")
+    listener_module.handle_screenshot_hotkey_press("PROMPT_X")
 
-    # Фото отправлено
-    assert ctx["photos"] and ctx["photos"][0][0] == b"PNG_BYTES"
-    # solve_image вызван с тем же prompt
-    assert ctx["solve_image"] and ctx["solve_image"][0][1] == "PROMPT_X"
-    # В Telegram ушло сообщение-ответ
-    assert ctx["messages"][-1] == "IMG ANSWER"
+    assert call_state["photos"]
+    assert call_state["photos"][0][0] == b"PNG_BYTES"
+    assert call_state["solve_image_calls"]
+    assert call_state["solve_image_calls"][0][1] == "PROMPT_X"
+    assert call_state["messages"][-1] == "IMAGE ANSWER"

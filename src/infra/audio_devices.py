@@ -1,14 +1,11 @@
-"""
-Автоопределение аудиоустройств (Windows) для FFmpeg.
-"""
-
 from __future__ import annotations
-from typing import Optional
+
 import re
 import subprocess
 from functools import lru_cache
+from typing import Optional
 
-_DSHOW_CMD = [
+LIST_DEVICES_COMMAND = [
     "ffmpeg",
     "-hide_banner",
     "-list_devices",
@@ -22,61 +19,62 @@ _DSHOW_CMD = [
 
 @lru_cache(maxsize=1)
 def list_audio_devices() -> list[str]:
-    """Возвращает список имён всех аудио-устройств DirectShow."""
-    proc = subprocess.run(
-        _DSHOW_CMD,
+    completed_process = subprocess.run(
+        LIST_DEVICES_COMMAND,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,  # нужен stderr
+        stderr=subprocess.PIPE,
         check=False,
     )
 
-    stderr = proc.stderr.decode("utf-8", errors="replace")
-    devices: list[str] = []
-    for line in stderr.splitlines():
+    stderr_text = completed_process.stderr.decode("utf-8", errors="replace")
+    device_names: list[str] = []
+
+    for line in stderr_text.splitlines():
         if "(audio)" not in line:
             continue
-        m = re.search(r'"(.+?)"', line)
-        if m:
-            devices.append(m.group(1))
-    return devices
+        match = re.search(r'"(.+?)"', line)
+        if match:
+            device_names.append(match.group(1))
+
+    return device_names
 
 
 def pick_default_devices() -> tuple[str, str]:
-    """
-    Возвращает (mic_device, mix_device).
+    device_names = list_audio_devices()
 
-    mic  — строка, содержащая «микрофон»/«microphone»
-    mix  — строка, содержащая «stereo mix» или оба слова «стерео» и «микшер»
-    """
-    devs = list_audio_devices()
-    mix: Optional[str] = None
-    mic: Optional[str] = None
-    if len(devs) == 2 and any("mix" in d.lower() for d in devs):
-        mic, mix = devs
-        if "mix" in mic.lower():
-            mic, mix = mix, mic
-        return mic, mix
+    microphone_device: Optional[str] = None
+    stereo_mix_device: Optional[str] = None
 
-    mic = next(
-        (d for d in devs if "микрофон" in d.lower() or "microphone" in d.lower()),
+    if len(device_names) == 2 and any("mix" in device.lower() for device in device_names):
+        first_device, second_device = device_names
+        if "mix" in first_device.lower():
+            return second_device, first_device
+        return first_device, second_device
+
+    microphone_device = next(
+        (
+            device
+            for device in device_names
+            if "микрофон" in device.lower() or "microphone" in device.lower()
+        ),
         None,
     )
-    mix = next(
+    stereo_mix_device = next(
         (
-            d
-            for d in devs
-            if ("стерео" in d.lower() and "микшер" in d.lower())
-            or "stereo mix" in d.lower()
+            device
+            for device in device_names
+            if ("стерео" in device.lower() and "микшер" in device.lower())
+            or "stereo mix" in device.lower()
         ),
         None,
     )
 
-    if not mic or not mix:
+    if microphone_device is None or stereo_mix_device is None:
         raise RuntimeError(
             "Автопоиск устройств не удался.\n"
-            f"Найдено: {devs or 'ничего'}\n"
+            f"Найдено: {device_names or 'ничего'}\n"
             "Включи Stereo Mix в «Панель управления → Звук → Запись» "
             "или задай MIC_DEVICE/MIX_DEVICE через переменные окружения."
         )
 
-    return mic, mix
+    return microphone_device, stereo_mix_device
