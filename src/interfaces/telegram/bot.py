@@ -1,71 +1,72 @@
-"""
-Основная задача модуля — принимать от пользователя команды и сообщения,
-а затем незаметно запускать операции (GPT-ответ, OCR и т. д.) в фоновом
-потоке, не блокируя event-loop python-telegram-bot.
-"""
-
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
-from telegram.request import HTTPXRequest
 import asyncio
 
-from src.settings import TG_BOT_TOKEN
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.request import HTTPXRequest
+
 from src.infra.yandex_gpt import solve_text
 from src.interfaces.hotkeys.listener import PROMPTS
+from src.settings import TG_BOT_TOKEN
 
-request = HTTPXRequest(connect_timeout=20, read_timeout=20)
-app = ApplicationBuilder().token(TG_BOT_TOKEN).request(request).build()
-
-HELP = (
+HELP_TEXT = (
     "/help – эта справка\n"
     "/prompts – список подсказок (Alt+1…9)\n"
     "/p <n> – ответ по подсказке №n\n"
     "Любой другой текст → ответ GPT."
 )
-THINKING = "⌛ Думаю…"
-BULB = "💡 "
+THINKING_TEXT = "⌛ Думаю…"
+ANSWER_PREFIX = "💡 "
+
+
+def _build_app():
+    request = HTTPXRequest(connect_timeout=20, read_timeout=20)
+    app = ApplicationBuilder().token(TG_BOT_TOKEN).request(request).build()
+
+    app.add_handler(CommandHandler(["start", "help"], cmd_help))
+    app.add_handler(CommandHandler("prompts", cmd_prompts))
+    app.add_handler(CommandHandler("p", cmd_p))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_msg))
+    return app
+
+
+async def _safe_reply(update: Update, text: str) -> bool:
+    msg = update.message
+    if msg is None:
+        return False
+    await msg.reply_text(text)
+    return True
+
+
+async def _solve_in_thread(text: str) -> str:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, solve_text, text)
 
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.message
-    if msg is None:
-        return
-    await msg.reply_text(HELP)
+    await _safe_reply(update, HELP_TEXT)
 
 
 async def cmd_prompts(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.message
-    if msg is None:
-        return
-    txt = "\n".join(f"{i}. {p.splitlines()[0][:60]}…" for i, p in enumerate(PROMPTS, 1))
-    await msg.reply_text(txt)
+    lines = [f"{index}. {prompt.splitlines()[0][:60]}…" for index, prompt in enumerate(PROMPTS, start=1)]
+    await _safe_reply(update, "\n".join(lines))
 
 
 async def cmd_p(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.message
-    if msg is None:
+    if update.message is None:
         return
 
-    args = ctx.args or []
-    if not args or not args[0].isdigit():
-        await msg.reply_text("Использование: /p <1-9>")
+    if not ctx.args or not ctx.args[0].isdigit():
+        await update.message.reply_text("Использование: /p <1-9>")
         return
 
-    n = int(args[0])
-    if not 1 <= n <= len(PROMPTS):
-        await msg.reply_text("Использование: /p <1-9>")
+    prompt_index = int(ctx.args[0]) - 1
+    if not (0 <= prompt_index < len(PROMPTS)):
+        await update.message.reply_text("Использование: /p <1-9>")
         return
 
-    await msg.reply_text(THINKING)
-    loop = asyncio.get_running_loop()
-    answer = await loop.run_in_executor(None, solve_text, PROMPTS[n - 1])
-    await msg.reply_text(f"{BULB}{answer}")
+    await update.message.reply_text(THINKING_TEXT)
+    answer = await _solve_in_thread(PROMPTS[prompt_index])
+    await update.message.reply_text(f"{ANSWER_PREFIX}{answer}")
 
 
 async def on_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -73,20 +74,13 @@ async def on_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if msg is None or msg.text is None:
         return
 
-    await msg.reply_text(THINKING)
-    text = msg.text
-    loop = asyncio.get_running_loop()
-    answer = await loop.run_in_executor(None, solve_text, text)
-    await msg.reply_text(f"{BULB}{answer}")
-
-
-app.add_handler(CommandHandler(["start", "help"], cmd_help))
-app.add_handler(CommandHandler("prompts", cmd_prompts))
-app.add_handler(CommandHandler("p", cmd_p))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_msg))
+    await msg.reply_text(THINKING_TEXT)
+    answer = await _solve_in_thread(msg.text)
+    await msg.reply_text(f"{ANSWER_PREFIX}{answer}")
 
 
 def main() -> None:
+    app = _build_app()
     app.run_polling()
 
 
