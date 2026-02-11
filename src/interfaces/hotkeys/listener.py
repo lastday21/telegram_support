@@ -25,21 +25,17 @@ def _resolve_devices() -> tuple[str, str]:
     return pick_default_devices()
 
 
-MIC_DEVICE, MIX_DEVICE = _resolve_devices()
-_rec = VoiceRecorder(mic_device=MIC_DEVICE, mix_device=MIX_DEVICE)
-# MIC_DEVICE = (
-#     "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\"
-#     "wave_{EBB798E2-2326-4DC4-A40F-5BD075C42CDC}"
-# )
-# MIX_DEVICE = (
-#     "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\"
-#     "wave_{108367BD-4575-4D6D-9B91-5AF7AF0FBEA9}"
-# )
-#
-# _rec = VoiceRecorder(
-#     mic_device="Набор микрофонов (Технология Intel® Smart Sound для цифровых микрофонов)",
-#     mix_device="Стерео микшер (Realtek(R) Audio)",
-# )
+_rec = None
+
+
+def _get_recorder() -> VoiceRecorder:
+    global _rec
+    if _rec is None:
+        mic_device, mix_device = _resolve_devices()
+        _rec = VoiceRecorder(mic_device=mic_device, mix_device=mix_device)
+    return _rec
+
+
 _is_recording = False
 
 
@@ -48,11 +44,11 @@ def _toggle_rec():
     wav = None
     try:
         if not _is_recording:
-            _rec.start()
+            _get_recorder().start()
             _is_recording = True
             print("🎙 Запись началась (Alt+Q — стоп)")
         else:
-            wav = _rec.stop()
+            wav = _get_recorder().stop()
             _is_recording = False
 
             text = transcribe(wav)

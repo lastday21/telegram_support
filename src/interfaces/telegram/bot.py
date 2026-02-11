@@ -15,12 +15,9 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 import asyncio
 
-from src.settings import TG_BOT_TOKEN
+from src.settings import TG_BOT_TOKEN, require_settings
 from src.infra.yandex_gpt import solve_text
 from src.interfaces.hotkeys.listener import PROMPTS
-
-request = HTTPXRequest(connect_timeout=20, read_timeout=20)
-app = ApplicationBuilder().token(TG_BOT_TOKEN).request(request).build()
 
 HELP = (
     "/help – эта справка\n"
@@ -80,13 +77,17 @@ async def on_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await msg.reply_text(f"{BULB}{answer}")
 
 
-app.add_handler(CommandHandler(["start", "help"], cmd_help))
-app.add_handler(CommandHandler("prompts", cmd_prompts))
-app.add_handler(CommandHandler("p", cmd_p))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_msg))
-
 
 def main() -> None:
+    require_settings("TG_BOT_TOKEN")
+    request = HTTPXRequest(connect_timeout=20, read_timeout=20)
+    app = ApplicationBuilder().token(TG_BOT_TOKEN).request(request).build()
+
+    app.add_handler(CommandHandler(["start", "help"], cmd_help))
+    app.add_handler(CommandHandler("prompts", cmd_prompts))
+    app.add_handler(CommandHandler("p", cmd_p))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_msg))
+
     app.run_polling()
 
 
