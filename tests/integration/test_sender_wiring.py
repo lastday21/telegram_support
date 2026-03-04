@@ -1,5 +1,5 @@
-from src.interfaces.telegram import sender
-from src.settings import Settings
+from app.interfaces.telegram import sender
+from app.settings import Settings
 
 
 def test_build_sender_uses_settings_credentials(monkeypatch):

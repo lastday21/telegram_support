@@ -2,13 +2,13 @@ import os
 import threading
 from collections.abc import Callable, Sequence
 
-from src.domain.audio.recorder import VoiceRecorder
-from src.infra.audio_devices import pick_default_devices
-from src.infra.yandex_gpt import solve_image, solve_text
-from src.infra.yandex_stt import transcribe
-from src.interfaces.telegram.sender import send_message, send_photo
-from src.prompts import PROMPTS
-from src.settings import load_env
+from app.domain.audio.recorder import VoiceRecorder
+from app.infra.audio_devices import pick_default_devices
+from app.infra.yandex_gpt import solve_image, solve_text
+from app.infra.yandex_stt import transcribe
+from app.interfaces.telegram.sender import send_message, send_photo
+from app.prompts import PROMPTS
+from app.settings import load_env
 
 FIXED_PROMPT = "Дай развёрнутый полезный ответ для следующего текста или вопроса: "
 
@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - depends on local environment
 
 
 def _default_take_screenshot() -> bytes:
-    from src.domain.ocr.capture import take_screenshot
+    from app.domain.ocr.capture import take_screenshot
 
     return take_screenshot()
 

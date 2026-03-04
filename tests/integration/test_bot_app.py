@@ -1,7 +1,7 @@
 import types
 
-from src.interfaces.telegram import bot
-from src.settings import Settings
+from app.interfaces.telegram import bot
+from app.settings import Settings
 
 
 def test_create_app_registers_expected_handlers():

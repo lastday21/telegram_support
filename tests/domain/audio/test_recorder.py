@@ -3,7 +3,7 @@ import types
 
 import pytest
 
-from src.domain.audio.recorder import RECORDS_DIR, VoiceRecorder
+from app.domain.audio.recorder import RECORDS_DIR, VoiceRecorder
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def fake_popen(monkeypatch):
             return 0
 
     monkeypatch.setattr(
-        "src.domain.audio.recorder.subprocess.Popen", _FakeProc, raising=True
+        "app.domain.audio.recorder.subprocess.Popen", _FakeProc, raising=True
     )
     return calls
 
@@ -70,7 +70,7 @@ def test_stop_returns_recorded_file(recorder, fake_popen):
 def test_stop_raises_when_ffmpeg_did_not_create_file(
     monkeypatch, recorder, fake_popen, tmp_path
 ):
-    monkeypatch.setattr("src.domain.audio.recorder.Path.cwd", lambda: tmp_path)
+    monkeypatch.setattr("app.domain.audio.recorder.Path.cwd", lambda: tmp_path)
     recorder.start()
 
     with pytest.raises(RuntimeError, match="не создал WAV-файл"):
@@ -78,7 +78,7 @@ def test_stop_raises_when_ffmpeg_did_not_create_file(
 
 
 def test_start_creates_records_directory(monkeypatch, recorder, fake_popen, tmp_path):
-    monkeypatch.setattr("src.domain.audio.recorder.Path.cwd", lambda: tmp_path)
+    monkeypatch.setattr("app.domain.audio.recorder.Path.cwd", lambda: tmp_path)
 
     recorder.start()
 

@@ -16,7 +16,7 @@
 
 ```
 support_telegram/
-├── src/
+├── app/
 │   ├── domain/
 │   │   ├── audio/       # запись и преобразование микрофонного ввода
 │   │   │   └── recorder.py
@@ -63,13 +63,13 @@ support_telegram/
 4. Запустить приложение:
 
    ```bash
-   python src/main.py
+   python app/main.py
    ```
 
 ## Конфигурация
 
-* **Горячие клавиши** настраиваются в `src/interfaces/hotkeys/listener.py`. При необходимости можно включать/выключать через флаг `DEBUG_HOTKEYS`.
-* **Список подсказок** (`PROMPTS`) находится в `src/interfaces/hotkeys/listener.py`. Рекомендуется вынести длинные тексты в отдельный JSON-файл и загружать по ссылке.
+* **Горячие клавиши** настраиваются в `app/interfaces/hotkeys/listener.py`. При необходимости можно включать/выключать через флаг `DEBUG_HOTKEYS`.
+* **Список подсказок** (`PROMPTS`) находится в `app/interfaces/hotkeys/listener.py`. Рекомендуется вынести длинные тексты в отдельный JSON-файл и загружать по ссылке.
 * **AI-интеграция**: можно заменить модуль `yandex_gpt.py` на любой другой провайдер, реализующий интерфейс `solve_text(prompt: str)`.
 
 ## Использование

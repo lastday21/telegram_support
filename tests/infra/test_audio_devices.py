@@ -3,7 +3,7 @@
 """
 
 import pytest
-import src.infra.audio_devices as ad
+import app.infra.audio_devices as ad
 
 
 @pytest.fixture

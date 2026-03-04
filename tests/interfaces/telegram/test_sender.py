@@ -1,4 +1,4 @@
-from src.interfaces.telegram.sender import TelegramSender
+from app.interfaces.telegram.sender import TelegramSender
 
 
 class _FakeResp:

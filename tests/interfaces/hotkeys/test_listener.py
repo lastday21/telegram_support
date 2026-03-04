@@ -1,4 +1,4 @@
-from src.interfaces.hotkeys.listener import FIXED_PROMPT, HotkeyService
+from app.interfaces.hotkeys.listener import FIXED_PROMPT, HotkeyService
 
 
 class _FakeRecorder:

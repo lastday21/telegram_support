@@ -2,8 +2,8 @@ from typing import Union
 
 import requests
 
-from src.infra.yandex_ocr import recognize_text
-from src.settings import get_settings
+from app.infra.yandex_ocr import recognize_text
+from app.settings import get_settings
 
 API_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 DEFAULT_SYSTEM = (

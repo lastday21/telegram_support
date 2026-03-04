@@ -3,21 +3,21 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: python -m ruff check src tests
+        entry: python -m ruff check app tests
         language: system
         pass_filenames: false
         stages: [pre-commit]
 
       - id: ruff-format
         name: ruff format
-        entry: python -m ruff format --check src tests
+        entry: python -m ruff format --check app tests
         language: system
         pass_filenames: false
         stages: [pre-commit]
 
       - id: mypy
         name: mypy
-        entry: python -m mypy --config-file mypy.ini src tests
+        entry: python -m mypy --config-file mypy.ini app tests
         language: system
         pass_filenames: false
         stages: [pre-commit]

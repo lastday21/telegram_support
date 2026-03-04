@@ -2,7 +2,7 @@ import base64
 
 import pytest
 
-from src.infra.yandex_ocr import DEFAULT_LANGUAGES, DEFAULT_MODEL, YandexOCRClient
+from app.infra.yandex_ocr import DEFAULT_LANGUAGES, DEFAULT_MODEL, YandexOCRClient
 
 
 class _FakeResp:

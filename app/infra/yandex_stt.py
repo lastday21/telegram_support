@@ -3,7 +3,7 @@ import wave
 
 import requests
 
-from src.settings import get_settings
+from app.settings import get_settings
 
 BASE_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 DEBUG = True

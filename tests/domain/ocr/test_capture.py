@@ -1,5 +1,5 @@
 """
-Юнит-тесты для функции take_screenshot() из src.domain.ocr.capture.
+Юнит-тесты для функции take_screenshot() из app.domain.ocr.capture.
 
      1  (region=None, monitor=1, PNG) –
    • вызывается sct.shot(); возвращаются байты «файла».
@@ -25,7 +25,7 @@ import pytest
 @pytest.fixture
 def capture_module(monkeypatch):
     """
-    Готовит фэйковые библиотеки и импортирует src.domain.ocr.capture заново,
+    Готовит фэйковые библиотеки и импортирует app.domain.ocr.capture заново,
     чтобы каждый тест работал с собственным словарём `calls`.
     """
 
@@ -82,8 +82,8 @@ def capture_module(monkeypatch):
     sys.modules["PIL"] = fake_pil_mod
     sys.modules["PIL.Image"] = fake_pil_image
 
-    sys.modules.pop("src.domain.ocr.capture", None)  # <-- ключевой сброс
-    capture = importlib.import_module("src.domain.ocr.capture")
+    sys.modules.pop("app.domain.ocr.capture", None)  # <-- ключевой сброс
+    capture = importlib.import_module("app.domain.ocr.capture")
 
     return capture, calls
 
@@ -109,7 +109,7 @@ def capture_module(monkeypatch):
     sys.modules["PIL"] = fake_pil_mod
     sys.modules["PIL.Image"] = fake_pil_image
 
-    capture = importlib.import_module("src.domain.ocr.capture")
+    capture = importlib.import_module("app.domain.ocr.capture")
 
     return capture, calls
 

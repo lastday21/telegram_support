@@ -5,7 +5,7 @@ from typing import Union
 
 import requests
 
-from src.settings import get_settings
+from app.settings import get_settings
 
 OCR_API_URL = "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText"
 DEFAULT_LANGUAGES = ("ru", "en")

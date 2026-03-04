@@ -3,7 +3,7 @@ from typing import BinaryIO, Union
 
 import requests
 
-from src.settings import get_settings
+from app.settings import get_settings
 
 DEFAULT_CAPTION = ""
 

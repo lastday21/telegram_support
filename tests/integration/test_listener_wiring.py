@@ -1,4 +1,4 @@
-from src.interfaces.hotkeys import listener
+from app.interfaces.hotkeys import listener
 
 
 class _FakeRecorder:

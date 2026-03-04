@@ -16,8 +16,8 @@ class _FakeThread:
 
 def _load_main_module():
     sys.modules["keyboard"] = types.SimpleNamespace(wait=lambda: None)
-    sys.modules.pop("src.main", None)
-    return importlib.import_module("src.main")
+    sys.modules.pop("app.main", None)
+    return importlib.import_module("app.main")
 
 
 def test_main_starts_hotkeys_thread_and_runs_bot(monkeypatch):

@@ -3,9 +3,9 @@ from __future__ import annotations
 import threading
 import traceback
 
-from src.interfaces.hotkeys.listener import main as hk_main
-from src.interfaces.telegram.bot import main as tg_main
-from src.settings import env_flag
+from app.interfaces.hotkeys.listener import main as hk_main
+from app.interfaces.telegram.bot import main as tg_main
+from app.settings import env_flag
 
 try:
     import keyboard as keyboard_module

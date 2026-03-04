@@ -1,4 +1,4 @@
-from src.infra.yandex_gpt import DEFAULT_SYSTEM, YandexGPTClient
+from app.infra.yandex_gpt import DEFAULT_SYSTEM, YandexGPTClient
 
 
 class _FakeResp:

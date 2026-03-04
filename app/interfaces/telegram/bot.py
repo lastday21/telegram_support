@@ -11,9 +11,9 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-from src.infra.yandex_gpt import solve_text
-from src.prompts import PROMPTS
-from src.settings import get_settings
+from app.infra.yandex_gpt import solve_text
+from app.prompts import PROMPTS
+from app.settings import get_settings
 
 HELP = (
     "/help - список команд\n"
