@@ -1,6 +1,6 @@
-import subprocess
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+import subprocess
 
 
 class VoiceRecorder:
@@ -10,35 +10,71 @@ class VoiceRecorder:
         self.proc: subprocess.Popen | None = None
         self.filepath: Path | None = None
 
-    def start(self):
+    def start(self) -> None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = Path(f"record_{ts}.wav")
+        out = (Path.cwd() / f"record_{ts}.wav").resolve()
         self.filepath = out
 
-        cmd = (
-            f"ffmpeg -y -loglevel error "
-            f'-f dshow -i "audio={self.mix}" '
-            f'-f dshow -i "audio={self.mic}" '
-            f"-filter_complex amix=inputs=2:normalize=0 "
-            f'-ac 1 -ar 16000 "{out}"'
-        )
-        print("🔴 REC start →", out)
-        print("CMD:", cmd)
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "dshow",
+            "-i",
+            f"audio={self.mix}",
+            "-f",
+            "dshow",
+            "-i",
+            f"audio={self.mic}",
+            "-filter_complex",
+            "amix=inputs=2:normalize=0",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            str(out),
+        ]
+        print("🔴 REC start ", out.name)
+        print("CMD:", subprocess.list2cmdline(cmd))
 
-        self.proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE)
+        self.proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
 
     def stop(self) -> Path:
         if not self.proc:
             raise RuntimeError("Запись не запущена")
+
+        proc = self.proc
         try:
-            assert self.proc.stdin is not None, "stdin был None"
+            assert proc.stdin is not None, "stdin was None"
+            proc.stdin.write(b"q")
+            proc.stdin.flush()
+        except Exception as exc:
+            print("[voice] Не удалось послать 'q' в FFmpeg:", exc)
 
-            self.proc.stdin.write(b"q")
-            self.proc.stdin.flush()
-        except Exception as e:
-            print("[voice] Не удалось послать 'q' в FFmpeg:", e)
+        proc.wait(timeout=5)
+        stderr_text = ""
+        if proc.stderr is not None:
+            stderr_text = proc.stderr.read().decode("utf-8", errors="replace").strip()
 
-        self.proc.wait(timeout=5)
-        print("🛑 REC stop →", self.filepath)
         assert self.filepath is not None
+        print("🛑 REC stop ", self.filepath.name)
+        self.proc = None
+
+        if proc.returncode not in (0, None):
+            raise RuntimeError(
+                f"FFmpeg завершился с кодом {proc.returncode}: {stderr_text or 'без сообщения'}"
+            )
+        if not self.filepath.exists():
+            raise RuntimeError(
+                "FFmpeg не создал WAV-файл. "
+                f"Путь: {self.filepath}. "
+                f"stderr: {stderr_text or 'пусто'}"
+            )
         return self.filepath
