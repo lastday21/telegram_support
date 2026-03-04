@@ -22,3 +22,4 @@ build/
 *.ico
 .pytest-temp/
 record_*.wav
+records/

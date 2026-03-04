@@ -2,6 +2,8 @@ from datetime import datetime
 from pathlib import Path
 import subprocess
 
+RECORDS_DIR = "records"
+
 
 class VoiceRecorder:
     def __init__(self, mic_device: str, mix_device: str):
@@ -12,7 +14,9 @@ class VoiceRecorder:
 
     def start(self) -> None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = (Path.cwd() / f"record_{ts}.wav").resolve()
+        out_dir = (Path.cwd() / RECORDS_DIR).resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"record_{ts}.wav"
         self.filepath = out
 
         cmd = [
