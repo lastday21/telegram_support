@@ -1,62 +1,45 @@
-"""
-Проверяем send_photo() и send_message() в interfaces.telegram.sender.
-"""
-
-import sys
-import types
-import importlib
-import pytest
+from src.interfaces.telegram.sender import TelegramSender
 
 
-@pytest.fixture
-def sender(monkeypatch):
-    """Возвращает (module, call_dict) с «свежим» sender.py и мок-HTTP."""
-    calls: dict[str, object] = {}
+class _FakeResp:
+    def __init__(self, calls):
+        self.calls = calls
 
-    fake_settings = types.ModuleType("settings")
-    fake_settings.TG_BOT_TOKEN = "TOKEN123"
-    fake_settings.TG_CHAT_ID = 777
-    sys.modules["settings"] = fake_settings
-    sys.modules["src.settings"] = fake_settings
+    def raise_for_status(self):
+        self.calls["raised"] = True
 
-    class _FakeResp:
-        def raise_for_status(self):
-            calls["raised"] = True
+
+def test_send_photo_with_bytes():
+    calls = {}
 
     def _fake_http(url, data=None, files=None, timeout=None):
         calls.update(url=url, data=data, files=files, timeout=timeout)
-        return _FakeResp()
+        return _FakeResp(calls)
 
-    fake_requests = types.ModuleType("requests")
-    fake_requests.post = _fake_http
-    fake_requests.get = _fake_http
-    sys.modules["requests"] = fake_requests
+    sender = TelegramSender(bot_token="TOKEN123", chat_id=777, http_post=_fake_http)
 
-    sys.modules.pop("src.interfaces.telegram.sender", None)  # ключевой сброс
-    mod = importlib.import_module("src.interfaces.telegram.sender")
+    sender.send_photo(b"PNG_BYTES", caption="hi!")
 
-    return mod, calls
-
-
-def test_send_photo_with_bytes(sender):
-    mod, call = sender
-
-    mod.send_photo(b"PNG_BYTES", caption="hi!")
-
-    assert "/sendPhoto" in call["url"]
-    assert call["data"]["chat_id"] == 777
-    assert call["data"]["caption"] == "hi!"
-    name, payload = call["files"]["photo"]
+    assert "/sendPhoto" in calls["url"]
+    assert calls["data"]["chat_id"] == 777
+    assert calls["data"]["caption"] == "hi!"
+    name, payload = calls["files"]["photo"]
     assert payload == b"PNG_BYTES" and name.endswith(".png")
-    assert call["raised"] and call["timeout"] == 30
+    assert calls["raised"] and calls["timeout"] == 30
 
 
-def test_send_message(sender):
-    mod, call = sender
+def test_send_message():
+    calls = {}
 
-    mod.send_message("hello world")
+    def _fake_http(url, data=None, files=None, timeout=None):
+        calls.update(url=url, data=data, files=files, timeout=timeout)
+        return _FakeResp(calls)
 
-    assert "/sendMessage" in call["url"]
-    assert call["data"] == {"chat_id": 777, "text": "hello world"}
-    assert call["files"] is None
-    assert call["raised"] and call["timeout"] == 30
+    sender = TelegramSender(bot_token="TOKEN123", chat_id=777, http_post=_fake_http)
+
+    sender.send_message("hello world")
+
+    assert "/sendMessage" in calls["url"]
+    assert calls["data"] == {"chat_id": 777, "text": "hello world"}
+    assert calls.get("files") is None
+    assert calls["raised"] and calls["timeout"] == 30

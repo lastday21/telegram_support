@@ -1,90 +1,89 @@
-"""
-Проверяем:
-1. solve_text()      – короткий текст → early-return; длинный → зовёт _gpt_request.
-2. solve_image()     – OCR + GPT: вызывается pytesseract и _gpt_request c комбинированным prompt.
-
-Все внешние зависимости (HTTP, Pillow, Tesseract) мокируем, чтобы
-тесты работали оффлайн и быстро.
-"""
-
 import types
-import src.infra.yandex_gpt as gpt
+
+from src.infra.yandex_gpt import DEFAULT_SYSTEM, YandexGPTClient
 
 
-def test_solve_text_too_short():
-    """Если строка < 3 симв. → сразу 🤷 без вызова GPT."""
-    assert (
-        gpt.solve_text("ok")  # 2 символа
-        == "🤷 Не понял вопрос (текст слишком короткий)."  # ожидаемый early-return
-    )
+class _FakeResp:
+    def __init__(self, payload):
+        self.payload = payload
 
+    def raise_for_status(self):
+        return None
 
-def test_solve_text_calls_gpt(monkeypatch):
-    """solve_text() должен прокинуть текст в _gpt_request и вернуть его ответ."""
-    call = {}
-
-    def _fake_req(user_text, system_prompt, temperature):
-        call["args"] = (user_text, system_prompt, temperature)
-        return "ANSWER"
-
-    monkeypatch.setattr(gpt, "_gpt_request", _fake_req)
-
-    out = gpt.solve_text("How to sort list?")
-    assert out == "ANSWER" and "args" in call
+    def json(self):
+        return self.payload
 
 
 class _FakeImg:
-    """Минимальный объект, передаваемый в pytesseract.image_to_string."""
-
     pass
 
 
-def test_solve_image_success(monkeypatch):
-    """Корректный OCR → формируется комбинированный prompt и идёт запрос к GPT."""
+def test_solve_text_too_short():
+    client = YandexGPTClient(api_key="KEY", folder_id="FOLDER")
+    assert client.solve_text("ok") == "Слишком короткий запрос (нужно больше контекста)."
+
+
+def test_solve_text_calls_gpt():
     calls = {}
 
-    # --- мокаем Image.open ----------------------------------------------------
+    def _fake_http(url, headers, json, timeout):
+        calls["url"] = url
+        calls["headers"] = headers
+        calls["json"] = json
+        calls["timeout"] = timeout
+        return _FakeResp(
+            {"result": {"alternatives": [{"message": {"text": "ANSWER"}}]}}
+        )
+
+    client = YandexGPTClient(api_key="KEY", folder_id="FOLDER", http_post=_fake_http)
+
+    out = client.solve_text("How to sort list?")
+
+    assert out == "ANSWER"
+    assert calls["json"]["messages"][1]["text"] == "How to sort list?"
+    assert calls["json"]["messages"][0]["text"] == DEFAULT_SYSTEM
+
+
+def test_solve_image_success():
+    calls = {}
+
     def _fake_open(fp):
         calls["image_opened"] = True
         return _FakeImg()
 
-    monkeypatch.setattr(gpt, "Image", types.SimpleNamespace(open=_fake_open))
-
     def _fake_ocr(img, lang, config):
-        calls["ocr_called"] = True
+        calls["ocr_called"] = (img, lang, config)
         return "SELECT * FROM table;"
 
-    monkeypatch.setattr(
-        gpt,
-        "pytesseract",
-        types.SimpleNamespace(image_to_string=_fake_ocr),
+    def _fake_http(url, headers, json, timeout):
+        calls["prompt"] = json["messages"][1]["text"]
+        return _FakeResp(
+            {"result": {"alternatives": [{"message": {"text": "SQL explanation"}}]}}
+        )
+
+    client = YandexGPTClient(
+        api_key="KEY",
+        folder_id="FOLDER",
+        http_post=_fake_http,
+        image_open=_fake_open,
+        ocr_to_string=_fake_ocr,
     )
 
-    def _fake_req(user_text, system_prompt, temperature=0.3):
-        calls["prompt"] = user_text
-        return "SQL explanation"
-
-    monkeypatch.setattr(gpt, "_gpt_request", _fake_req)
-
-    result = gpt.solve_image(b"bytes", prompt="Объясни SQL")
+    result = client.solve_image(b"bytes", prompt="Объясни SQL")
 
     assert result == "SQL explanation"
+    assert "Объясни SQL" in calls["prompt"]
+    assert "SELECT *" in calls["prompt"]
+    assert calls.get("ocr_called")
+    assert calls.get("image_opened")
 
-    assert "Объясни SQL" in calls["prompt"] and "SELECT *" in calls["prompt"]
-    assert calls.get("ocr_called") and calls.get("image_opened")
 
-
-def test_solve_image_no_text(monkeypatch):
-    """Когда OCR не распознал текст → функция возвращает сообщение об ошибке."""
-    monkeypatch.setattr(
-        gpt,
-        "Image",
-        types.SimpleNamespace(open=lambda fp: _FakeImg()),
-    )
-    monkeypatch.setattr(
-        gpt,
-        "pytesseract",
-        types.SimpleNamespace(image_to_string=lambda *a, **kw: ""),
+def test_solve_image_no_text():
+    client = YandexGPTClient(
+        api_key="KEY",
+        folder_id="FOLDER",
+        image_open=lambda fp: _FakeImg(),
+        ocr_to_string=lambda *a, **kw: "",
     )
 
-    assert gpt.solve_image(b"bytes") == "Не удалось распознать текст на изображении."
+    assert client.solve_image(b"bytes") == "Не удалось распознать текст на изображении."

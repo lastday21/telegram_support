@@ -1,23 +1,139 @@
-import threading
-import keyboard
-from PIL import Image
-import pytesseract
 import os
+import threading
+from collections.abc import Callable, Sequence
 
 from src.domain.audio.recorder import VoiceRecorder
-from src.infra.yandex_stt import transcribe
-from src.infra.yandex_gpt import solve_text, solve_image
-from src.interfaces.telegram.sender import send_message, send_photo
-from src.domain.ocr.capture import take_screenshot
-from io import BytesIO
 from src.infra.audio_devices import pick_default_devices
+from src.infra.yandex_gpt import solve_image, solve_text
+from src.infra.yandex_stt import transcribe
+from src.interfaces.telegram.sender import send_message, send_photo
+from src.prompts import PROMPTS
+from src.settings import load_env
+
+FIXED_PROMPT = "Дай развёрнутый полезный ответ для следующего текста или вопроса: "
+
+try:
+    import keyboard as keyboard_module
+except ImportError:  # pragma: no cover - depends on local environment
+    keyboard_module = None
 
 
-FIXED_PROMPT = "Расскажи максимально подробно про следующую тему/напиши код: "
+def _default_take_screenshot() -> bytes:
+    from src.domain.ocr.capture import take_screenshot
+
+    return take_screenshot()
+
+
+class HotkeyService:
+    def __init__(
+        self,
+        recorder: VoiceRecorder,
+        transcribe_fn: Callable = transcribe,
+        solve_text_fn: Callable[[str], str] = solve_text,
+        solve_image_fn: Callable[[bytes, str], str] = solve_image,
+        send_message_fn: Callable[[str], None] = send_message,
+        send_photo_fn: Callable[[bytes, str | None], None] = send_photo,
+        take_screenshot_fn: Callable[[], bytes] | None = None,
+        prompts: Sequence[str] = PROMPTS,
+        fixed_prompt: str = FIXED_PROMPT,
+    ) -> None:
+        self.recorder = recorder
+        self.transcribe = transcribe_fn
+        self.solve_text = solve_text_fn
+        self.solve_image = solve_image_fn
+        self.send_message = send_message_fn
+        self.send_photo = send_photo_fn
+        self.take_screenshot = take_screenshot_fn or _default_take_screenshot
+        self.prompts = list(prompts)
+        self.fixed_prompt = fixed_prompt
+        self.is_recording = False
+
+    def toggle_recording(self) -> None:
+        wav = None
+        try:
+            if not self.is_recording:
+                self.recorder.start()
+                self.is_recording = True
+                print("Идёт запись аудио (Alt+Q -> стоп)")
+                return
+
+            wav = self.recorder.stop()
+            self.is_recording = False
+
+            text = self.transcribe(wav)
+            print(f"Распознано: {text or '<пусто>'}")
+            if not text.strip():
+                return
+
+            self.send_message(f"Ты продиктовал:\n{text}")
+            answer = self.solve_text(self.fixed_prompt + text)
+            self.send_message(f"Ответ:\n{answer}")
+        except Exception:
+            import traceback
+
+            print("\n---- ERROR audio-module ----")
+            traceback.print_exc()
+            print("----------------------------\n")
+        finally:
+            if wav is not None and wav.exists():
+                wav.unlink(missing_ok=True)
+
+    def handle_prompt(self, prompt: str) -> None:
+        try:
+            img_bytes = self.take_screenshot()
+            self.send_photo(img_bytes, caption=prompt)
+            answer = self.solve_image(img_bytes, prompt)
+            self.send_message(answer)
+        except Exception as exc:
+            import traceback
+
+            traceback.print_exc()
+            self.send_message(f"Ошибка модуля скриншота: {exc}")
+
+    def register_hotkeys(
+        self,
+        keyboard_module_override=None,
+        thread_factory: Callable[[Callable, tuple], None] | None = None,
+    ) -> None:
+        keyboard_impl = keyboard_module_override or keyboard_module
+        if keyboard_impl is None:
+            raise RuntimeError("keyboard package is not installed")
+
+        thread_factory = thread_factory or _start_daemon_thread
+        keyboard_impl.add_hotkey(
+            "alt+q", lambda: thread_factory(self.toggle_recording, ())
+        )
+        for index, prompt in enumerate(self.prompts, start=1):
+            keyboard_impl.add_hotkey(
+                f"alt+{index}",
+                lambda prompt_text=prompt: thread_factory(
+                    self.handle_prompt, (prompt_text,)
+                ),
+            )
+
+    def run(
+        self,
+        keyboard_module_override=None,
+        thread_factory: Callable[[Callable, tuple], None] | None = None,
+    ) -> None:
+        keyboard_impl = keyboard_module_override or keyboard_module
+        if keyboard_impl is None:
+            raise RuntimeError("keyboard package is not installed")
+
+        print("Готово! Alt+Q -> запись, Alt+1-Alt+9 -> скриншот + GPT")
+        self.register_hotkeys(
+            keyboard_module_override=keyboard_impl,
+            thread_factory=thread_factory,
+        )
+        keyboard_impl.wait()
+
+
+def _start_daemon_thread(target: Callable, args: tuple) -> None:
+    threading.Thread(target=target, args=args, daemon=True).start()
 
 
 def _resolve_devices() -> tuple[str, str]:
-    """Берём устройства из ENV, а если их нет — ищем автоматически."""
+    load_env()
     mic_env = os.getenv("MIC_DEVICE")
     mix_env = os.getenv("MIX_DEVICE")
     if mic_env and mix_env:
@@ -25,109 +141,19 @@ def _resolve_devices() -> tuple[str, str]:
     return pick_default_devices()
 
 
-MIC_DEVICE, MIX_DEVICE = _resolve_devices()
-_rec = VoiceRecorder(mic_device=MIC_DEVICE, mix_device=MIX_DEVICE)
-# MIC_DEVICE = (
-#     "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\"
-#     "wave_{EBB798E2-2326-4DC4-A40F-5BD075C42CDC}"
-# )
-# MIX_DEVICE = (
-#     "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\"
-#     "wave_{108367BD-4575-4D6D-9B91-5AF7AF0FBEA9}"
-# )
-#
-# _rec = VoiceRecorder(
-#     mic_device="Набор микрофонов (Технология Intel® Smart Sound для цифровых микрофонов)",
-#     mix_device="Стерео микшер (Realtek(R) Audio)",
-# )
-_is_recording = False
+def build_hotkey_service() -> HotkeyService:
+    mic_device, mix_device = _resolve_devices()
+    recorder = VoiceRecorder(mic_device=mic_device, mix_device=mix_device)
+    return HotkeyService(recorder=recorder)
 
 
-def _toggle_rec():
-    global _is_recording
-    wav = None
-    try:
-        if not _is_recording:
-            _rec.start()
-            _is_recording = True
-            print("🎙 Запись началась (Alt+Q — стоп)")
-        else:
-            wav = _rec.stop()
-            _is_recording = False
-
-            text = transcribe(wav)
-            print(f"📝 Распознано: {text or '<пусто>'}")
-            if not text.strip():
-                return
-
-            send_message(f"🗣 Вы сказали:\n{text}")
-            answer = solve_text(FIXED_PROMPT + text)
-            send_message(f"💡 {answer}")
-
-    except Exception:
-        import traceback
-
-        print("\n—— ERROR audio-module ———")
-        traceback.print_exc()
-        print("——————————————————————\n")
-
-    finally:
-        if wav is not None and wav.exists():
-            wav.unlink(missing_ok=True)
+def _toggle_rec() -> None:
+    build_hotkey_service().toggle_recording()
 
 
-def _handler(prompt: str):
-    try:
-        img_bytes = take_screenshot()
-        send_photo(img_bytes, caption=prompt)
-
-        ocr_text = pytesseract.image_to_string(
-            Image.open(BytesIO(img_bytes)), lang="rus+eng", config="--oem 3 --psm 6"
-        ).strip()
-
-        print("\n===== AI INPUT =====")
-        print(prompt, ocr_text, sep="\n")
-        print("===== END INPUT =====\n")
-
-        answer = solve_image(img_bytes, prompt)
-        send_message(answer)
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        send_message(f"🚨 ERROR screenshot-module: {exc}")
+def _handler(prompt: str) -> None:
+    build_hotkey_service().handle_prompt(prompt)
 
 
-# ──────────────────  Список промптов Alt+1…9  ─────────────────
-PROMPTS = [
-     """У меня есть учебная задача по backend на Python. Определи, к какому типу она относится: что приходит на вход, что нужно вернуть на выходе и какие ограничения есть? Объясни максимально просто, без сложных терминов.""",
-    """У меня есть учебная задача по backend на Python. Опиши, какой алгоритм подходит для её решения: как он работает и почему его стоит выбрать? Приведи простое описание и название алгоритма.""",
-    """У меня есть учебная задача по backend на Python. Какая структура данных лучше всего подходит для решения этой задачи и почему? Покажи небольшой пример в коде.""",
-    """У меня есть учебная задача по backend на Python. Разбей процесс написания решения на понятные шаги: опиши каждый шаг и покажи пример кода по частям, а в конце собери полный вариант.""",
-    """У меня есть учебная задача по backend на Python. Объясни сложность предлагаемого алгоритма простыми словами и предложи, как его можно улучшить при большем времени.""",
-    """У меня есть учебная задача по backend на Python. Составь краткое описание решения по пунктам, чтобы я мог пересказать его своими словами.""",
-    """У меня есть учебная задача по backend на Python. Напиши полный код решения с комментариями к каждому важному фрагменту.""",
-    """У меня есть учебная задача по backend на Python. Напиши полный код решения без комментариев, чтобы можно было сразу проверить работу.""",
-    """У меня есть учебная задача по backend на Python. Подскажи, какие вопросы могут задать по этому решению, и дай простые понятные ответы на них.""",
-]
-
-
-# ──────────────────── Регистрация хоткеев ────────────────────
-def main():
-    print("Готово!  Alt+Q — аудио,  Alt+1…Alt+9 — скриншот + GPT")
-
-    keyboard.add_hotkey(
-        "alt+q", lambda: threading.Thread(target=_toggle_rec, daemon=True).start()
-    )
-    for i, prm in enumerate(PROMPTS, start=1):
-        keyboard.add_hotkey(
-            f"alt+{i}",
-            lambda p=prm: threading.Thread(
-                target=_handler, args=(p,), daemon=True
-            ).start(),
-        )
-    keyboard.wait()
-
-
-if __name__ == "__main__":
-    main()
+def main() -> None:
+    build_hotkey_service().run()
