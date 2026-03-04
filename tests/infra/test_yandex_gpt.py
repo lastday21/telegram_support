@@ -12,10 +12,6 @@ class _FakeResp:
         return self.payload
 
 
-class _FakeImg:
-    pass
-
-
 def test_solve_text_too_short():
     client = YandexGPTClient(api_key="KEY", folder_id="FOLDER")
     assert (
@@ -47,12 +43,8 @@ def test_solve_text_calls_gpt():
 def test_solve_image_success():
     calls = {}
 
-    def _fake_open(fp):
-        calls["image_opened"] = True
-        return _FakeImg()
-
-    def _fake_ocr(img, lang, config):
-        calls["ocr_called"] = (img, lang, config)
+    def _fake_ocr(image):
+        calls["ocr_called"] = image
         return "SELECT * FROM table;"
 
     def _fake_http(url, headers, json, timeout):
@@ -65,8 +57,7 @@ def test_solve_image_success():
         api_key="KEY",
         folder_id="FOLDER",
         http_post=_fake_http,
-        image_open=_fake_open,
-        ocr_to_string=_fake_ocr,
+        ocr_text_fn=_fake_ocr,
     )
 
     result = client.solve_image(b"bytes", prompt="Объясни SQL")
@@ -74,16 +65,14 @@ def test_solve_image_success():
     assert result == "SQL explanation"
     assert "Объясни SQL" in calls["prompt"]
     assert "SELECT *" in calls["prompt"]
-    assert calls.get("ocr_called")
-    assert calls.get("image_opened")
+    assert calls["ocr_called"] == b"bytes"
 
 
 def test_solve_image_no_text():
     client = YandexGPTClient(
         api_key="KEY",
         folder_id="FOLDER",
-        image_open=lambda fp: _FakeImg(),
-        ocr_to_string=lambda *a, **kw: "",
+        ocr_text_fn=lambda image: "",
     )
 
     assert client.solve_image(b"bytes") == "Не удалось распознать текст на изображении."

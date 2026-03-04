@@ -1,11 +1,8 @@
-from io import BytesIO
-from pathlib import Path
 from typing import Union
 
-import pytesseract
 import requests
-from PIL import Image
 
+from src.infra.yandex_ocr import recognize_text
 from src.settings import get_settings
 
 API_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
@@ -20,13 +17,11 @@ class YandexGPTClient:
         api_key: str,
         folder_id: str,
         http_post=requests.post,
-        image_open=Image.open,
-        ocr_to_string=pytesseract.image_to_string,
+        ocr_text_fn=recognize_text,
         timeout: int = 120,
     ) -> None:
         self.http_post = http_post
-        self.image_open = image_open
-        self.ocr_to_string = ocr_to_string
+        self.ocr_text = ocr_text_fn
         self.timeout = timeout
         self.model_uri = f"gpt://{folder_id}/aliceai-llm"
         self.headers = {
@@ -74,13 +69,7 @@ class YandexGPTClient:
         prompt: str = "Проанализируй текст на изображении",
     ) -> str:
         try:
-            if isinstance(image, bytes):
-                img = self.image_open(BytesIO(image))
-            else:
-                img = self.image_open(Path(image))
-            text = self.ocr_to_string(
-                img, lang="rus+eng", config="--oem 3 --psm 6"
-            ).strip()
+            text = self.ocr_text(image).strip()
             if not text:
                 return "Не удалось распознать текст на изображении."
             combined = f"{prompt}\n\n{text}"
