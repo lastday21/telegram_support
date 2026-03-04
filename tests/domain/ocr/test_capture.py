@@ -91,7 +91,6 @@ def capture_module(monkeypatch):
 
     class _FakeImageObj:
         def save(self, buf, format):
-
             buf.write(b"JPEG_BYTES")
 
         def __enter__(self):

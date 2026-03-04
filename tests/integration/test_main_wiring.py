@@ -39,7 +39,9 @@ def test_main_starts_hotkeys_thread_and_runs_bot(monkeypatch):
     app_main.main(
         bot_main=_bot_main,
         hotkeys_main=_hotkeys_main,
-        keyboard_module=types.SimpleNamespace(wait=lambda: calls.__setitem__("wait_called", True)),
+        keyboard_module_override=types.SimpleNamespace(
+            wait=lambda: calls.__setitem__("wait_called", True)
+        ),
     )
 
     assert calls["thread_target"] is app_main.run_hotkeys
@@ -66,8 +68,38 @@ def test_main_waits_for_keyboard_when_bot_crashes(monkeypatch):
     app_main.main(
         bot_main=_boom,
         hotkeys_main=lambda: None,
-        keyboard_module=types.SimpleNamespace(wait=lambda: calls.__setitem__("wait_called", True)),
+        keyboard_module_override=types.SimpleNamespace(
+            wait=lambda: calls.__setitem__("wait_called", True)
+        ),
     )
 
     assert calls["thread_started"] is True
     assert calls["wait_called"] is True
+
+
+def test_main_skips_hotkeys_when_disabled():
+    app_main = _load_main_module()
+    calls = {}
+
+    app_main.main(
+        bot_main=lambda: calls.__setitem__("bot_main_called", True),
+        hotkeys_main=lambda: calls.__setitem__("hotkeys_main_called", True),
+        enable_hotkeys=False,
+    )
+
+    assert calls["bot_main_called"] is True
+    assert "hotkeys_main_called" not in calls
+
+
+def test_main_reraises_bot_error_when_hotkeys_disabled():
+    app_main = _load_main_module()
+
+    def _boom():
+        raise RuntimeError("bot failed")
+
+    try:
+        app_main.main(bot_main=_boom, enable_hotkeys=False)
+    except RuntimeError as exc:
+        assert str(exc) == "bot failed"
+    else:  # pragma: no cover - defensive branch
+        raise AssertionError("expected RuntimeError")

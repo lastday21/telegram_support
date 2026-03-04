@@ -5,7 +5,9 @@ from src.settings import Settings
 
 
 def test_create_app_registers_expected_handlers():
-    app = bot.create_app(bot_token="TOKEN", solve_text_fn=lambda text: text, prompts=["A", "B"])
+    app = bot.create_app(
+        bot_token="TOKEN", solve_text_fn=lambda text: text, prompts=["A", "B"]
+    )
 
     handlers = app.handlers[0]
 

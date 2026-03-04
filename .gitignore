@@ -2,6 +2,12 @@
 venv/
 .idea/
 __pycache__/
+.pytest_cache/
+.pytest-temp-run/
+.pytest-temp-pre-commit/
+.ruff_cache/
+.mypy_cache/
+.pre-commit-cache/
 
 # секреты
 .env
@@ -15,3 +21,4 @@ build/
 *.pkg
 *.ico
 .pytest-temp/
+record_*.wav

@@ -81,7 +81,7 @@ class HotkeyService:
     def handle_prompt(self, prompt: str) -> None:
         try:
             img_bytes = self.take_screenshot()
-            self.send_photo(img_bytes, caption=prompt)
+            self.send_photo(img_bytes, prompt)
             answer = self.solve_image(img_bytes, prompt)
             self.send_message(answer)
         except Exception as exc:

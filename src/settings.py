@@ -34,9 +34,17 @@ def _require(name: str) -> str:
     val = os.getenv(name)
     if not val:
         raise RuntimeError(
-            f"{name} не задан. " "Скопируйте .env.example -> .env и заполните значения."
+            f"{name} не задан. Скопируйте .env.example -> .env и заполните значения."
         )
     return val
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    load_env()
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def load_settings() -> Settings:

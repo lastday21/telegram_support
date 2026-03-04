@@ -55,7 +55,9 @@ def test_transcribe_success(monkeypatch, tmp_path):
         return _FakeResp()
 
     client = YandexSTTClient(api_key="KEY", folder_id="FOLDER", http_post=_fake_post)
-    monkeypatch.setattr("src.infra.yandex_stt.wave", types.SimpleNamespace(open=_fake_wave_open))
+    monkeypatch.setattr(
+        "src.infra.yandex_stt.wave", types.SimpleNamespace(open=_fake_wave_open)
+    )
 
     wav_path = tmp_path / "ok.wav"
     wav_path.touch()
@@ -74,7 +76,9 @@ def test_transcribe_bad_geometry(monkeypatch, tmp_path):
         return _FakeWave(ok=False)
 
     client = YandexSTTClient(api_key="KEY", folder_id="FOLDER")
-    monkeypatch.setattr("src.infra.yandex_stt.wave", types.SimpleNamespace(open=_bad_wave_open))
+    monkeypatch.setattr(
+        "src.infra.yandex_stt.wave", types.SimpleNamespace(open=_bad_wave_open)
+    )
 
     wav_path = tmp_path / "bad.wav"
     wav_path.touch()

@@ -1,0 +1,17 @@
+.git
+.github
+.idea
+.mypy_cache
+.pytest_cache
+.pytest-temp
+.pytest-temp-run
+.ruff_cache
+__pycache__
+venv
+tests
+Tesseract-OCR
+.env
+*.wav
+*.pyc
+build
+dist

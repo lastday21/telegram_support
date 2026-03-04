@@ -1,5 +1,3 @@
-import types
-
 from src.infra.yandex_gpt import DEFAULT_SYSTEM, YandexGPTClient
 
 
@@ -20,7 +18,9 @@ class _FakeImg:
 
 def test_solve_text_too_short():
     client = YandexGPTClient(api_key="KEY", folder_id="FOLDER")
-    assert client.solve_text("ok") == "Слишком короткий запрос (нужно больше контекста)."
+    assert (
+        client.solve_text("ok") == "Слишком короткий запрос (нужно больше контекста)."
+    )
 
 
 def test_solve_text_calls_gpt():

@@ -66,7 +66,9 @@ def test_stop_returns_recorded_file(recorder, fake_popen):
     assert wav_path == recorder.filepath
 
 
-def test_stop_raises_when_ffmpeg_did_not_create_file(monkeypatch, recorder, fake_popen, tmp_path):
+def test_stop_raises_when_ffmpeg_did_not_create_file(
+    monkeypatch, recorder, fake_popen, tmp_path
+):
     monkeypatch.setattr("src.domain.audio.recorder.Path.cwd", lambda: tmp_path)
     recorder.start()
 

@@ -10,8 +10,7 @@ from src.settings import get_settings
 
 API_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 DEFAULT_SYSTEM = (
-    "Ты помощник: отвечай кратко, ясно, "
-    "структурируй мысли, если нужно пиши по шагам."
+    "Ты помощник: отвечай кратко, ясно, структурируй мысли, если нужно пиши по шагам."
 )
 
 
@@ -57,7 +56,10 @@ class YandexGPTClient:
         return resp.json()["result"]["alternatives"][0]["message"]["text"].strip()
 
     def solve_text(
-        self, user_text: str, system_prompt: str = DEFAULT_SYSTEM, temperature: float = 0
+        self,
+        user_text: str,
+        system_prompt: str = DEFAULT_SYSTEM,
+        temperature: float = 0,
     ) -> str:
         if len(user_text.strip()) < 3:
             return "Слишком короткий запрос (нужно больше контекста)."

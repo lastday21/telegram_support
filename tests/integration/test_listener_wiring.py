@@ -1,5 +1,3 @@
-import types
-
 from src.interfaces.hotkeys import listener
 
 
@@ -29,7 +27,9 @@ def test_register_hotkeys_binds_all_prompts():
         def add_hotkey(self, combo, handler):
             registered.append((combo, handler))
 
-    service = listener.HotkeyService(recorder=_FakeRecorder("MIC", "MIX"), prompts=["A", "B"])
+    service = listener.HotkeyService(
+        recorder=_FakeRecorder("MIC", "MIX"), prompts=["A", "B"]
+    )
     service.register_hotkeys(
         keyboard_module_override=_Keyboard(),
         thread_factory=lambda target, args: launched.append((target, args)),

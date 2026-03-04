@@ -42,7 +42,9 @@ class YandexSTTClient:
             "format": "lpcm",
             "sampleRateHertz": "16000",
         }
-        url = BASE_URL + "?" + "&".join(f"{key}={value}" for key, value in params.items())
+        url = (
+            BASE_URL + "?" + "&".join(f"{key}={value}" for key, value in params.items())
+        )
 
         _log("POST", url, f"({len(raw)} bytes)")
 

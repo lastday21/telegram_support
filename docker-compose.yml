@@ -1,0 +1,9 @@
+services:
+  telegram-support:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      ENABLE_HOTKEYS: "0"
+    restart: unless-stopped
