@@ -80,9 +80,14 @@ class HotkeyService:
 
     def handle_prompt(self, prompt: str) -> None:
         try:
+            print(f"📸 Screenshot flow started: {prompt[:80]}")
             img_bytes = self.take_screenshot()
+            print(f"📎 Screenshot captured: {len(img_bytes)} bytes")
             self.send_photo(img_bytes, prompt)
+            print("📤 Screenshot sent to Telegram")
             answer = self.solve_image(img_bytes, prompt)
+            print(f"💡 Screenshot answer ready: {len(answer)} chars")
+            print(f"💬 Screenshot answer: {answer}")
             self.send_message(answer)
         except Exception as exc:
             import traceback

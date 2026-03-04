@@ -8,6 +8,8 @@ from src.infra.yandex_ocr import DEFAULT_LANGUAGES, DEFAULT_MODEL, YandexOCRClie
 class _FakeResp:
     def __init__(self, payload):
         self.payload = payload
+        self.status_code = 200
+        self.text = str(payload)
 
     def raise_for_status(self):
         return None
@@ -65,3 +67,51 @@ def test_recognize_text_rejects_unsupported_extension(tmp_path):
 
     with pytest.raises(RuntimeError, match="Unsupported image format"):
         client.recognize_text(bad_path)
+
+
+def test_recognize_text_logs_empty_response(capsys):
+    client = YandexOCRClient(
+        api_key="KEY",
+        http_post=lambda url, headers, json, timeout: _FakeResp(
+            {"textAnnotation": {"fullText": ""}, "result": {"pages": []}}
+        ),
+    )
+
+    result = client.recognize_text(b"PNG_BYTES")
+    out = capsys.readouterr().out
+
+    assert result == ""
+    assert "[ocr] http status: 200" in out
+    assert "[ocr] empty OCR response:" in out
+
+
+def test_recognize_text_reads_nested_blocks_when_full_text_is_empty():
+    client = YandexOCRClient(
+        api_key="KEY",
+        http_post=lambda url, headers, json, timeout: _FakeResp(
+            {
+                "result": {
+                    "textAnnotation": {
+                        "fullText": "",
+                        "blocks": [
+                            {
+                                "lines": [
+                                    {"text": "Development"},
+                                    {"text": "Question 1"},
+                                ]
+                            },
+                            {
+                                "lines": [
+                                    {"words": [{"text": "Explain"}, {"text": "SQL"}]}
+                                ]
+                            },
+                        ],
+                    }
+                }
+            }
+        ),
+    )
+
+    result = client.recognize_text(b"PNG_BYTES")
+
+    assert result == "Development\nQuestion 1\n\nExplain SQL"

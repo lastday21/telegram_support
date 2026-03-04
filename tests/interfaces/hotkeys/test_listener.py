@@ -46,7 +46,7 @@ def test_toggle_rec_start_and_stop(tmp_path):
     assert not wav_path.exists()
 
 
-def test_handler_screenshot_flow():
+def test_handler_screenshot_flow(capsys):
     ctx = {
         "messages": [],
         "photos": [],
@@ -64,7 +64,13 @@ def test_handler_screenshot_flow():
     )
 
     service.handle_prompt("PROMPT_X")
+    out = capsys.readouterr().out
 
     assert ctx["photos"] == [(b"PNG_BYTES", "PROMPT_X")]
     assert ctx["solve_image"] == [(b"PNG_BYTES", "PROMPT_X")]
     assert ctx["messages"] == ["IMG ANSWER"]
+    assert "Screenshot flow started" in out
+    assert "Screenshot captured" in out
+    assert "Screenshot sent to Telegram" in out
+    assert "Screenshot answer ready" in out
+    assert "Screenshot answer: IMG ANSWER" in out

@@ -71,9 +71,14 @@ class YandexGPTClient:
         try:
             text = self.ocr_text(image).strip()
             if not text:
+                print("[gpt] OCR returned empty text")
                 return "Не удалось распознать текст на изображении."
             combined = f"{prompt}\n\n{text}"
-            return self.gpt_request(combined, DEFAULT_SYSTEM)
+            print(f"[gpt] sending OCR text to GPT: {len(text)} chars")
+            answer = self.gpt_request(combined, DEFAULT_SYSTEM)
+            print(f"[gpt] got answer from GPT: {len(answer)} chars")
+            print(f"[gpt] answer text: {answer}")
+            return answer
         except Exception as exc:
             return f"Ошибка OCR/Yandex GPT: {exc}"
 
