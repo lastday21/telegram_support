@@ -6,7 +6,10 @@ from app.settings import Settings
 
 def test_create_app_registers_expected_handlers():
     app = bot.create_app(
-        bot_token="TOKEN", solve_text_fn=lambda text: text, prompts=["A", "B"]
+        bot_token="TOKEN",
+        solve_text_fn=lambda text: text,
+        prompts=["A", "B"],
+        allowed_chat_id="CHAT",
     )
 
     handlers = app.handlers[0]
@@ -31,7 +34,11 @@ def test_create_app_uses_token_from_settings(monkeypatch):
         ),
     )
 
-    app = bot.create_app(solve_text_fn=lambda text: text, prompts=["A"])
+    app = bot.create_app(
+        solve_text_fn=lambda text: text,
+        prompts=["A"],
+        allowed_chat_id="CHAT",
+    )
 
     assert app.bot.token == "TOKEN_FROM_SETTINGS"
 
@@ -46,3 +53,17 @@ def test_main_runs_polling_on_created_app(monkeypatch):
     bot.main()
 
     assert calls["run_polling_called"] is True
+
+
+def test_service_allows_only_configured_chat():
+    service = bot.TelegramBotService(
+        solve_text_fn=lambda text: text,
+        prompts=["A"],
+        allowed_chat_id="42",
+    )
+
+    allowed = types.SimpleNamespace(effective_chat=types.SimpleNamespace(id=42))
+    denied = types.SimpleNamespace(effective_chat=types.SimpleNamespace(id=43))
+
+    assert service.is_allowed(allowed) is True
+    assert service.is_allowed(denied) is False

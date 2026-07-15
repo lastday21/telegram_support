@@ -1,9 +1,19 @@
 services:
-  telegram-support:
+  server:
     build:
       context: .
     env_file:
       - .env
-    environment:
-      ENABLE_HOTKEYS: "0"
+      - .env.access
+    ports:
+      - "${SERVER_BIND_ADDRESS:-127.0.0.1}:${SERVER_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  telegram-bot:
+    build:
+      context: .
+    env_file:
+      - .env
+      - .env.access
+    command: ["python", "-m", "app.interfaces.telegram.bot"]
     restart: unless-stopped

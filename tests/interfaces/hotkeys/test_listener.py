@@ -54,8 +54,9 @@ def test_handler_screenshot_flow(capsys):
     }
     service = HotkeyService(
         recorder=_FakeRecorder(None),
-        solve_image_fn=lambda img, prompt: ctx["solve_image"].append((img, prompt))
-        or "IMG ANSWER",
+        solve_image_fn=lambda img, prompt: (
+            ctx["solve_image"].append((img, prompt)) or "IMG ANSWER"
+        ),
         send_message_fn=lambda text: ctx["messages"].append(text),
         send_photo_fn=lambda photo, caption=None: ctx["photos"].append(
             (photo, caption)

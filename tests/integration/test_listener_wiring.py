@@ -1,3 +1,5 @@
+import types
+
 from app.interfaces.hotkeys import listener
 
 
@@ -8,7 +10,19 @@ class _FakeRecorder:
 
 
 def test_build_hotkey_service_uses_detected_devices(monkeypatch):
-    monkeypatch.setattr(listener, "load_env", lambda: None)
+    remote_client = types.SimpleNamespace(
+        transcribe=lambda _path: "text",
+        solve_text=lambda _text: "answer",
+        solve_image=lambda _image, _prompt: "answer",
+        send_message=lambda _text: None,
+        send_photo=lambda _photo, _caption=None: None,
+    )
+    monkeypatch.setattr(
+        listener,
+        "get_client_settings",
+        lambda: types.SimpleNamespace(mic_device=None, mix_device=None),
+    )
+    monkeypatch.setattr(listener, "build_remote_client", lambda: remote_client)
     monkeypatch.setattr(listener, "pick_default_devices", lambda: ("MIC", "MIX"))
     monkeypatch.setattr(listener, "VoiceRecorder", _FakeRecorder)
 
@@ -17,6 +31,7 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
     assert service.recorder.mic_device == "MIC"
     assert service.recorder.mix_device == "MIX"
     assert service.prompts == listener.PROMPTS
+    assert service.solve_text("question") == "answer"
 
 
 def test_register_hotkeys_binds_all_prompts():

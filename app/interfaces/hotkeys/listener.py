@@ -1,19 +1,20 @@
 import os
 import threading
 from collections.abc import Callable, Sequence
+from typing import Any
 
 from app.domain.audio.recorder import VoiceRecorder
 from app.infra.audio_devices import pick_default_devices
-from app.infra.yandex_gpt import solve_image, solve_text
-from app.infra.yandex_stt import transcribe
-from app.interfaces.telegram.sender import send_message, send_photo
+from app.infra.remote_client import build_remote_client
 from app.prompts import PROMPTS
-from app.settings import load_env
+from app.settings import get_client_settings
 
 FIXED_PROMPT = "Дай развёрнутый полезный ответ для следующего текста или вопроса: "
 
 try:
-    import keyboard as keyboard_module
+    import keyboard as _keyboard_module
+
+    keyboard_module: Any | None = _keyboard_module
 except ImportError:  # pragma: no cover - depends on local environment
     keyboard_module = None
 
@@ -24,25 +25,29 @@ def _default_take_screenshot() -> bytes:
     return take_screenshot()
 
 
+def _missing_server_client(*_args, **_kwargs):
+    raise RuntimeError("Серверный клиент не настроен")
+
+
 class HotkeyService:
     def __init__(
         self,
         recorder: VoiceRecorder,
-        transcribe_fn: Callable = transcribe,
-        solve_text_fn: Callable[[str], str] = solve_text,
-        solve_image_fn: Callable[[bytes, str], str] = solve_image,
-        send_message_fn: Callable[[str], None] = send_message,
-        send_photo_fn: Callable[[bytes, str | None], None] = send_photo,
+        transcribe_fn: Callable | None = None,
+        solve_text_fn: Callable[[str], str] | None = None,
+        solve_image_fn: Callable[[bytes, str], str] | None = None,
+        send_message_fn: Callable[[str], None] | None = None,
+        send_photo_fn: Callable[[bytes, str | None], None] | None = None,
         take_screenshot_fn: Callable[[], bytes] | None = None,
         prompts: Sequence[str] = PROMPTS,
         fixed_prompt: str = FIXED_PROMPT,
     ) -> None:
         self.recorder = recorder
-        self.transcribe = transcribe_fn
-        self.solve_text = solve_text_fn
-        self.solve_image = solve_image_fn
-        self.send_message = send_message_fn
-        self.send_photo = send_photo_fn
+        self.transcribe = transcribe_fn or _missing_server_client
+        self.solve_text = solve_text_fn or _missing_server_client
+        self.solve_image = solve_image_fn or _missing_server_client
+        self.send_message = send_message_fn or _missing_server_client
+        self.send_photo = send_photo_fn or _missing_server_client
         self.take_screenshot = take_screenshot_fn or _default_take_screenshot
         self.prompts = list(prompts)
         self.fixed_prompt = fixed_prompt
@@ -138,9 +143,9 @@ def _start_daemon_thread(target: Callable, args: tuple) -> None:
 
 
 def _resolve_devices() -> tuple[str, str]:
-    load_env()
-    mic_env = os.getenv("MIC_DEVICE")
-    mix_env = os.getenv("MIX_DEVICE")
+    settings = get_client_settings()
+    mic_env = settings.mic_device or os.getenv("MIC_DEVICE")
+    mix_env = settings.mix_device or os.getenv("MIX_DEVICE")
     if mic_env and mix_env:
         return mic_env, mix_env
     return pick_default_devices()
@@ -149,7 +154,15 @@ def _resolve_devices() -> tuple[str, str]:
 def build_hotkey_service() -> HotkeyService:
     mic_device, mix_device = _resolve_devices()
     recorder = VoiceRecorder(mic_device=mic_device, mix_device=mix_device)
-    return HotkeyService(recorder=recorder)
+    remote_client = build_remote_client()
+    return HotkeyService(
+        recorder=recorder,
+        transcribe_fn=remote_client.transcribe,
+        solve_text_fn=remote_client.solve_text,
+        solve_image_fn=remote_client.solve_image,
+        send_message_fn=remote_client.send_message,
+        send_photo_fn=remote_client.send_photo,
+    )
 
 
 def _toggle_rec() -> None:

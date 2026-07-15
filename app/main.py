@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import threading
 import traceback
+from typing import Any
 
 from app.interfaces.hotkeys.listener import main as hk_main
 from app.interfaces.telegram.bot import main as tg_main
 from app.settings import env_flag
 
 try:
-    import keyboard as keyboard_module
+    import keyboard as _keyboard_module
+
+    keyboard_module: Any | None = _keyboard_module
 except ImportError:  # pragma: no cover - depends on local environment
     keyboard_module = None
 

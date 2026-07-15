@@ -11,6 +11,7 @@ venv
 tests
 Tesseract-OCR
 .env
+.env.access
 *.wav
 *.pyc
 build
