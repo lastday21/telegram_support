@@ -1,3 +1,4 @@
+from app.domain.status import AppStatus
 from app.interfaces.hotkeys.listener import FIXED_PROMPT, HotkeyService
 
 
@@ -24,11 +25,15 @@ def test_toggle_rec_start_and_stop(tmp_path):
     wav_path.write_bytes(b"RIFF....WAVEfmt")
 
     recorder = _FakeRecorder(wav_path)
+    statuses = []
     service = HotkeyService(
         recorder=recorder,
         transcribe_fn=lambda wav: "hello world",
         solve_text_fn=lambda text: ctx["solve_text"].append(text) or "AI ANSWER",
         send_message_fn=lambda text: ctx["messages"].append(text),
+        status_callback=lambda status, message, notify: statuses.append(
+            (status, message, notify)
+        ),
     )
 
     service.toggle_recording()
@@ -44,9 +49,10 @@ def test_toggle_rec_start_and_stop(tmp_path):
     assert ctx["messages"][1].startswith("Ответ:")
     assert ctx["solve_text"] == [FIXED_PROMPT + "hello world"]
     assert not wav_path.exists()
+    assert statuses[-1] == (AppStatus.READY, "Ответ готов", True)
 
 
-def test_handler_screenshot_flow(capsys):
+def test_handler_screenshot_flow():
     ctx = {
         "messages": [],
         "photos": [],
@@ -65,13 +71,43 @@ def test_handler_screenshot_flow(capsys):
     )
 
     service.handle_prompt("PROMPT_X")
-    out = capsys.readouterr().out
 
     assert ctx["photos"] == [(b"PNG_BYTES", "PROMPT_X")]
     assert ctx["solve_image"] == [(b"PNG_BYTES", "PROMPT_X")]
     assert ctx["messages"] == ["IMG ANSWER"]
-    assert "Screenshot flow started" in out
-    assert "Screenshot captured" in out
-    assert "Screenshot sent to Telegram" in out
-    assert "Screenshot answer ready" in out
-    assert "Screenshot answer: IMG ANSWER" in out
+
+
+def test_prompt_is_rejected_while_recording():
+    messages = []
+    service = HotkeyService(
+        recorder=_FakeRecorder(None),
+        send_message_fn=messages.append,
+        status_callback=lambda status, message, notify: messages.append(message),
+    )
+    service.is_recording = True
+
+    service.handle_prompt("PROMPT_X")
+
+    assert messages == ["Сначала остановите запись"]
+
+
+def test_hotkey_repeat_is_ignored():
+    submitted = []
+
+    class _Queue:
+        def submit(self, target, args=()):
+            submitted.append((target, args))
+            return True
+
+        def close(self):
+            pass
+
+    service = HotkeyService(
+        recorder=_FakeRecorder(None),
+        action_queue=_Queue(),
+        clock=lambda: 10.0,
+    )
+
+    assert service.submit_toggle_recording() is True
+    assert service.submit_toggle_recording() is False
+    assert len(submitted) == 1

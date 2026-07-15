@@ -85,3 +85,37 @@ def test_transcribe_bad_geometry(monkeypatch, tmp_path):
 
     with pytest.raises(RuntimeError):
         client.transcribe(wav_path)
+
+
+def test_transcribe_splits_long_audio(monkeypatch, tmp_path):
+    chunks = []
+
+    def _fake_wave_open(path, mode="rb"):
+        return _FakeWave(ok=True)
+
+    class _PartResponse:
+        status_code = 200
+        text = ""
+
+        def __init__(self, number):
+            self.number = number
+
+        def json(self):
+            return {"result": f"часть {self.number}"}
+
+    def _fake_post(url, headers, data, timeout):
+        chunks.append(data)
+        return _PartResponse(len(chunks))
+
+    client = YandexSTTClient(api_key="KEY", folder_id="FOLDER", http_post=_fake_post)
+    monkeypatch.setattr(
+        "app.infra.yandex_stt.wave", types.SimpleNamespace(open=_fake_wave_open)
+    )
+    monkeypatch.setattr("app.infra.yandex_stt.MAX_CHUNK_BYTES", 100)
+    wav_path = tmp_path / "long.wav"
+    wav_path.touch()
+
+    result = client.transcribe(wav_path)
+
+    assert result == "часть 1 часть 2"
+    assert chunks == [_FAKE_RAW[:100], _FAKE_RAW[100:]]

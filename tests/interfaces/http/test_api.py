@@ -2,9 +2,15 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.interfaces.http.api import create_app
+from app.interfaces.http.api import MAX_AUDIO_SIZE, create_app
 
 AUTH = {"Authorization": "Bearer SECRET"}
+
+
+def test_audio_limit_allows_ten_minutes():
+    ten_minutes_pcm = 10 * 60 * 16_000 * 2 + 44
+
+    assert MAX_AUDIO_SIZE >= ten_minutes_pcm
 
 
 def _build_client(calls: dict) -> TestClient:

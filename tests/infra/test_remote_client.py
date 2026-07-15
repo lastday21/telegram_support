@@ -40,12 +40,17 @@ def test_remote_client_sends_audio_file(tmp_path: Path):
     def fake_post(url, **kwargs):
         calls["url"] = url
         calls["audio"] = kwargs["files"]["audio"][1].read()
+        calls["timeout"] = kwargs["timeout"]
         return _FakeResponse({"text": "Речь"})
 
     client = RemoteServiceClient("http://server", "SECRET", http_post=fake_post)
 
     assert client.transcribe(wav_path) == "Речь"
-    assert calls == {"url": "http://server/v1/transcribe", "audio": b"WAV"}
+    assert calls == {
+        "url": "http://server/v1/transcribe",
+        "audio": b"WAV",
+        "timeout": 600,
+    }
 
 
 def test_remote_client_proxies_telegram_photo():
@@ -64,4 +69,28 @@ def test_remote_client_proxies_telegram_photo():
         "url": "http://server/v1/telegram/photo",
         "data": {"caption": "Подпись"},
         "photo": b"PNG",
+    }
+
+
+def test_remote_client_checks_protected_ping():
+    calls = {}
+
+    def fake_get(url, **kwargs):
+        calls["url"] = url
+        calls["kwargs"] = kwargs
+        return _FakeResponse({"status": "ok"})
+
+    client = RemoteServiceClient(
+        "http://server",
+        "SECRET",
+        http_get=fake_get,
+    )
+
+    assert client.ping() is True
+    assert calls == {
+        "url": "http://server/v1/ping",
+        "kwargs": {
+            "headers": {"Authorization": "Bearer SECRET"},
+            "timeout": 5,
+        },
     }

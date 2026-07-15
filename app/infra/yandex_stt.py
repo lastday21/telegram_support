@@ -7,6 +7,7 @@ from app.settings import get_settings
 
 BASE_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 DEBUG = True
+MAX_CHUNK_BYTES = 900_000
 
 
 def _log(*message_parts):
@@ -34,8 +35,26 @@ class YandexSTTClient:
             sw = wf.getsampwidth()
             if (sr, ch, sw) != (16000, 1, 2):
                 raise RuntimeError("Нужен WAV 16 kHz mono 16-bit")
+            frame_size = ch * sw
             raw = wf.readframes(wf.getnframes())
 
+        if not raw:
+            return ""
+
+        chunk_size = MAX_CHUNK_BYTES - (MAX_CHUNK_BYTES % frame_size)
+        chunks = [
+            raw[offset : offset + chunk_size]
+            for offset in range(0, len(raw), chunk_size)
+        ]
+        parts: list[str] = []
+        for index, chunk in enumerate(chunks, start=1):
+            _log(f"часть {index}/{len(chunks)}", f"({len(chunk)} bytes)")
+            text = self._transcribe_chunk(chunk)
+            if text:
+                parts.append(text)
+        return " ".join(parts)
+
+    def _transcribe_chunk(self, raw: bytes) -> str:
         params = {
             "folderId": self.folder_id,
             "lang": "ru-RU",
@@ -56,9 +75,7 @@ class YandexSTTClient:
             _log("STT error:", response.text)
             raise RuntimeError(f"STT {response.status_code}: {response.text}")
 
-        text = response.json().get("result", "").strip()
-        _log("STT text:", text)
-        return text
+        return response.json().get("result", "").strip()
 
 
 def build_stt_client() -> YandexSTTClient:

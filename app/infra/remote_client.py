@@ -13,24 +13,40 @@ class RemoteServiceClient:
         server_url: str,
         access_token: str,
         http_post=requests.post,
+        http_get=requests.get,
         timeout: int = 120,
+        audio_timeout: int = 600,
+        ping_timeout: int = 5,
     ) -> None:
         self.server_url = server_url.rstrip("/")
         self.http_post = http_post
+        self.http_get = http_get
         self.timeout = timeout
+        self.audio_timeout = audio_timeout
+        self.ping_timeout = ping_timeout
         self.headers = {"Authorization": f"Bearer {access_token}"}
 
     def _post(self, path: str, **kwargs):
         headers = dict(self.headers)
         headers.update(kwargs.pop("headers", {}))
+        timeout = kwargs.pop("timeout", self.timeout)
         response = self.http_post(
             f"{self.server_url}{path}",
             headers=headers,
-            timeout=self.timeout,
+            timeout=timeout,
             **kwargs,
         )
         response.raise_for_status()
         return response
+
+    def ping(self) -> bool:
+        response = self.http_get(
+            f"{self.server_url}/v1/ping",
+            headers=self.headers,
+            timeout=self.ping_timeout,
+        )
+        response.raise_for_status()
+        return response.json().get("status") == "ok"
 
     def solve_text(self, text: str) -> str:
         response = self._post("/v1/text", json={"text": text})
@@ -49,6 +65,7 @@ class RemoteServiceClient:
             response = self._post(
                 "/v1/transcribe",
                 files={"audio": (wav_path.name, wav_file, "audio/wav")},
+                timeout=self.audio_timeout,
             )
         return str(response.json()["text"])
 

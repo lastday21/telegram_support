@@ -1,21 +1,39 @@
+from __future__ import annotations
+
 import os
 import threading
+import time
+import traceback
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Protocol
 
+from requests import RequestException
+
+from app.domain.actions import SerialActionQueue
 from app.domain.audio.recorder import VoiceRecorder
+from app.domain.status import AppStatus
 from app.infra.audio_devices import pick_default_devices
 from app.infra.remote_client import build_remote_client
 from app.prompts import PROMPTS
 from app.settings import get_client_settings
 
 FIXED_PROMPT = "Дай развёрнутый полезный ответ для следующего текста или вопроса: "
+HOTKEY_DEBOUNCE_SECONDS = 0.45
+
+StatusCallback = Callable[[AppStatus, str, bool], None]
+
+
+class ActionQueue(Protocol):
+    def submit(self, target: Callable, args: tuple = ()) -> bool: ...
+
+    def close(self) -> None: ...
+
 
 try:
     import keyboard as _keyboard_module
 
     keyboard_module: Any | None = _keyboard_module
-except ImportError:  # pragma: no cover - depends on local environment
+except ImportError:  # pragma: no cover - зависит от окружения Windows
     keyboard_module = None
 
 
@@ -39,6 +57,10 @@ class HotkeyService:
         send_message_fn: Callable[[str], None] | None = None,
         send_photo_fn: Callable[[bytes, str | None], None] | None = None,
         take_screenshot_fn: Callable[[], bytes] | None = None,
+        ping_fn: Callable[[], bool] | None = None,
+        status_callback: StatusCallback | None = None,
+        action_queue: ActionQueue | None = None,
+        clock: Callable[[], float] = time.monotonic,
         prompts: Sequence[str] = PROMPTS,
         fixed_prompt: str = FIXED_PROMPT,
     ) -> None:
@@ -49,56 +71,146 @@ class HotkeyService:
         self.send_message = send_message_fn or _missing_server_client
         self.send_photo = send_photo_fn or _missing_server_client
         self.take_screenshot = take_screenshot_fn or _default_take_screenshot
+        self.ping = ping_fn
+        self.status_callback = status_callback
         self.prompts = list(prompts)
         self.fixed_prompt = fixed_prompt
         self.is_recording = False
+        self._processing = False
+        self._state_lock = threading.Lock()
+        self._clock = clock
+        self._last_hotkey_at: dict[str, float] = {}
+        self._keyboard_impl = None
+        self._closed = False
+        self.action_queue = action_queue or SerialActionQueue(
+            on_error=self._handle_queue_error
+        )
 
     def toggle_recording(self) -> None:
         wav = None
-        try:
-            if not self.is_recording:
-                self.recorder.start()
-                self.is_recording = True
-                print("Идёт запись аудио (Alt+Q -> стоп)")
-                return
+        with self._state_lock:
+            if self._processing:
+                busy = True
+                starting = False
+            else:
+                busy = False
+                starting = not self.is_recording
+                self._processing = True
 
+        if busy:
+            self._report(AppStatus.BUSY, "Предыдущее действие ещё выполняется", True)
+            return
+
+        if starting:
+            try:
+                self.recorder.start()
+                with self._state_lock:
+                    self.is_recording = True
+                self._report(AppStatus.RECORDING, "Идёт запись")
+            except Exception as exc:
+                with self._state_lock:
+                    self.is_recording = False
+                self._report_error("Не удалось начать запись", exc)
+            finally:
+                with self._state_lock:
+                    self._processing = False
+            return
+
+        self._report(AppStatus.WORKING, "Останавливаю и обрабатываю запись")
+        try:
             wav = self.recorder.stop()
-            self.is_recording = False
+            with self._state_lock:
+                self.is_recording = False
 
             text = self.transcribe(wav)
-            print(f"Распознано: {text or '<пусто>'}")
             if not text.strip():
+                self._report(AppStatus.READY, "Речь не распознана", True)
                 return
 
             self.send_message(f"Ты продиктовал:\n{text}")
             answer = self.solve_text(self.fixed_prompt + text)
             self.send_message(f"Ответ:\n{answer}")
-        except Exception:
-            import traceback
-
-            print("\n---- ERROR audio-module ----")
-            traceback.print_exc()
-            print("----------------------------\n")
+            self._report(AppStatus.READY, "Ответ готов", True)
+        except Exception as exc:
+            with self._state_lock:
+                self.is_recording = False
+            self._report_error("Не удалось обработать запись", exc)
         finally:
+            with self._state_lock:
+                self._processing = False
             if wav is not None and wav.exists():
                 wav.unlink(missing_ok=True)
 
     def handle_prompt(self, prompt: str) -> None:
-        try:
-            print(f"📸 Screenshot flow started: {prompt[:80]}")
-            img_bytes = self.take_screenshot()
-            print(f"📎 Screenshot captured: {len(img_bytes)} bytes")
-            self.send_photo(img_bytes, prompt)
-            print("📤 Screenshot sent to Telegram")
-            answer = self.solve_image(img_bytes, prompt)
-            print(f"💡 Screenshot answer ready: {len(answer)} chars")
-            print(f"💬 Screenshot answer: {answer}")
-            self.send_message(answer)
-        except Exception as exc:
-            import traceback
+        with self._state_lock:
+            if self._processing or self.is_recording:
+                busy = True
+                recording = self.is_recording
+            else:
+                busy = False
+                recording = False
+                self._processing = True
 
-            traceback.print_exc()
-            self.send_message(f"Ошибка модуля скриншота: {exc}")
+        if busy:
+            status = AppStatus.RECORDING if recording else AppStatus.BUSY
+            message = (
+                "Сначала остановите запись"
+                if recording
+                else "Сначала завершите текущее действие"
+            )
+            self._report(status, message, True)
+            return
+
+        self._report(AppStatus.WORKING, "Обрабатываю снимок экрана")
+        try:
+            image = self.take_screenshot()
+            self.send_photo(image, prompt)
+            answer = self.solve_image(image, prompt)
+            self.send_message(answer)
+            self._report(AppStatus.READY, "Ответ по снимку готов", True)
+        except Exception as exc:
+            self._report_error("Не удалось обработать снимок", exc)
+            try:
+                self.send_message("Не удалось обработать снимок экрана")
+            except Exception:
+                pass
+        finally:
+            with self._state_lock:
+                self._processing = False
+
+    def check_server(self) -> bool:
+        if self.ping is None:
+            self._report(AppStatus.READY, "Готово")
+            return True
+        self._report(AppStatus.WORKING, "Проверяю сервер")
+        try:
+            if not self.ping():
+                raise RuntimeError("Сервер вернул неожиданный ответ")
+        except Exception as exc:
+            self._report_error("Сервер недоступен", exc, disconnected=True)
+            return False
+        self._report(AppStatus.READY, "Сервер доступен")
+        return True
+
+    def submit_toggle_recording(self) -> bool:
+        return self._submit_hotkey(
+            "recording",
+            self.toggle_recording,
+            (),
+        )
+
+    def submit_prompt(self, prompt: str, index: int) -> bool:
+        return self._submit_hotkey(
+            f"prompt-{index}",
+            self.handle_prompt,
+            (prompt,),
+        )
+
+    def submit_check_server(self) -> bool:
+        accepted = self.action_queue.submit(self.check_server)
+        if not accepted:
+            self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
+        return accepted
 
     def register_hotkeys(
         self,
@@ -107,9 +219,20 @@ class HotkeyService:
     ) -> None:
         keyboard_impl = keyboard_module_override or keyboard_module
         if keyboard_impl is None:
-            raise RuntimeError("keyboard package is not installed")
+            raise RuntimeError("Пакет keyboard не установлен")
+        self._keyboard_impl = keyboard_impl
 
-        thread_factory = thread_factory or _start_daemon_thread
+        if thread_factory is None:
+            keyboard_impl.add_hotkey("alt+q", self.submit_toggle_recording)
+            for index, prompt in enumerate(self.prompts, start=1):
+                keyboard_impl.add_hotkey(
+                    f"alt+{index}",
+                    lambda prompt_text=prompt, prompt_index=index: self.submit_prompt(
+                        prompt_text, prompt_index
+                    ),
+                )
+            return
+
         keyboard_impl.add_hotkey(
             "alt+q", lambda: thread_factory(self.toggle_recording, ())
         )
@@ -125,21 +248,86 @@ class HotkeyService:
         self,
         keyboard_module_override=None,
         thread_factory: Callable[[Callable, tuple], None] | None = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         keyboard_impl = keyboard_module_override or keyboard_module
         if keyboard_impl is None:
-            raise RuntimeError("keyboard package is not installed")
+            raise RuntimeError("Пакет keyboard не установлен")
 
-        print("Готово! Alt+Q -> запись, Alt+1-Alt+9 -> скриншот + GPT")
+        print("Готово: Alt+Q — запись, Alt+1–Alt+9 — снимок экрана")
         self.register_hotkeys(
             keyboard_module_override=keyboard_impl,
             thread_factory=thread_factory,
         )
-        keyboard_impl.wait()
+        self.submit_check_server()
+        try:
+            if stop_event is None:
+                keyboard_impl.wait()
+            else:
+                stop_event.wait()
+        finally:
+            self.close()
 
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.action_queue.close()
+        keyboard_impl = self._keyboard_impl
+        if keyboard_impl is not None and hasattr(keyboard_impl, "unhook_all_hotkeys"):
+            keyboard_impl.unhook_all_hotkeys()
+        if self.is_recording and hasattr(self.recorder, "abort"):
+            self.recorder.abort()
+        self.is_recording = False
 
-def _start_daemon_thread(target: Callable, args: tuple) -> None:
-    threading.Thread(target=target, args=args, daemon=True).start()
+    def _submit_hotkey(
+        self,
+        key: str,
+        target: Callable,
+        args: tuple,
+    ) -> bool:
+        now = self._clock()
+        with self._state_lock:
+            previous = self._last_hotkey_at.get(key)
+            if previous is not None and now - previous < HOTKEY_DEBOUNCE_SECONDS:
+                return False
+            self._last_hotkey_at[key] = now
+
+        accepted = self.action_queue.submit(target, args)
+        if not accepted:
+            self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
+        return accepted
+
+    def _report(
+        self,
+        status: AppStatus,
+        message: str,
+        notify: bool = False,
+    ) -> None:
+        print(f"[SmartHelper] {message}")
+        if self.status_callback is None:
+            return
+        try:
+            self.status_callback(status, message, notify)
+        except Exception:
+            traceback.print_exc()
+
+    def _report_error(
+        self,
+        message: str,
+        exc: Exception,
+        disconnected: bool = False,
+    ) -> None:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+        status = (
+            AppStatus.DISCONNECTED
+            if disconnected or isinstance(exc, RequestException)
+            else AppStatus.ERROR
+        )
+        self._report(status, message, True)
+
+    def _handle_queue_error(self, exc: Exception) -> None:
+        self._report_error("Не удалось выполнить действие", exc)
 
 
 def _resolve_devices() -> tuple[str, str]:
@@ -151,7 +339,9 @@ def _resolve_devices() -> tuple[str, str]:
     return pick_default_devices()
 
 
-def build_hotkey_service() -> HotkeyService:
+def build_hotkey_service(
+    status_callback: StatusCallback | None = None,
+) -> HotkeyService:
     mic_device, mix_device = _resolve_devices()
     recorder = VoiceRecorder(mic_device=mic_device, mix_device=mix_device)
     remote_client = build_remote_client()
@@ -162,15 +352,9 @@ def build_hotkey_service() -> HotkeyService:
         solve_image_fn=remote_client.solve_image,
         send_message_fn=remote_client.send_message,
         send_photo_fn=remote_client.send_photo,
+        ping_fn=remote_client.ping,
+        status_callback=status_callback,
     )
-
-
-def _toggle_rec() -> None:
-    build_hotkey_service().toggle_recording()
-
-
-def _handler(prompt: str) -> None:
-    build_hotkey_service().handle_prompt(prompt)
 
 
 def main() -> None:

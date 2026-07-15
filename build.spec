@@ -7,7 +7,12 @@ block_cipher = None
 root = Path(".").resolve()
 app_dir = root / "app"
 
-hiddenimports = collect_submodules("PIL") + ["keyboard", "mss"]
+hiddenimports = collect_submodules("PIL") + [
+    "keyboard",
+    "mss",
+    "pystray",
+    "pystray._win32",
+]
 
 a = Analysis(
     [str(app_dir / "desktop.py")],

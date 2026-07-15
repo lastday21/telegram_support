@@ -16,6 +16,7 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
         solve_image=lambda _image, _prompt: "answer",
         send_message=lambda _text: None,
         send_photo=lambda _photo, _caption=None: None,
+        ping=lambda: True,
     )
     monkeypatch.setattr(
         listener,
@@ -32,6 +33,7 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
     assert service.recorder.mix_device == "MIX"
     assert service.prompts == listener.PROMPTS
     assert service.solve_text("question") == "answer"
+    assert service.ping() is True
 
 
 def test_register_hotkeys_binds_all_prompts():

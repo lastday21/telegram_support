@@ -3,6 +3,8 @@ from pathlib import Path
 import subprocess
 
 RECORDS_DIR = "records"
+GRACEFUL_STOP_TIMEOUT = 5
+TERMINATE_TIMEOUT = 2
 
 
 class VoiceRecorder:
@@ -13,6 +15,9 @@ class VoiceRecorder:
         self.filepath: Path | None = None
 
     def start(self) -> None:
+        if self.proc is not None:
+            raise RuntimeError("Запись уже запущена")
+
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_dir = (Path.cwd() / RECORDS_DIR).resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -55,6 +60,7 @@ class VoiceRecorder:
             raise RuntimeError("Запись не запущена")
 
         proc = self.proc
+        forced_stop = False
         try:
             assert proc.stdin is not None, "stdin was None"
             proc.stdin.write(b"q")
@@ -62,19 +68,31 @@ class VoiceRecorder:
         except Exception as exc:
             print("[voice] Не удалось послать 'q' в FFmpeg:", exc)
 
-        proc.wait(timeout=5)
-        stderr_text = ""
-        if proc.stderr is not None:
-            stderr_text = proc.stderr.read().decode("utf-8", errors="replace").strip()
+        try:
+            proc.wait(timeout=GRACEFUL_STOP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            forced_stop = True
+            print("[voice] FFmpeg не остановился вовремя, завершаю процесс")
+            proc.terminate()
+            try:
+                proc.wait(timeout=TERMINATE_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=TERMINATE_TIMEOUT)
+        finally:
+            self.proc = None
+
+        stderr_text = self._read_stderr(proc)
 
         assert self.filepath is not None
         print("🛑 REC stop ", self.filepath.name)
-        self.proc = None
 
         if proc.returncode not in (0, None):
             raise RuntimeError(
                 f"FFmpeg завершился с кодом {proc.returncode}: {stderr_text or 'без сообщения'}"
             )
+        if forced_stop:
+            raise RuntimeError("FFmpeg пришлось остановить принудительно")
         if not self.filepath.exists():
             raise RuntimeError(
                 "FFmpeg не создал WAV-файл. "
@@ -82,3 +100,22 @@ class VoiceRecorder:
                 f"stderr: {stderr_text or 'пусто'}"
             )
         return self.filepath
+
+    def abort(self) -> None:
+        proc = self.proc
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=TERMINATE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=TERMINATE_TIMEOUT)
+        finally:
+            self.proc = None
+
+    @staticmethod
+    def _read_stderr(proc: subprocess.Popen) -> str:
+        if proc.stderr is None:
+            return ""
+        return proc.stderr.read().decode("utf-8", errors="replace").strip()

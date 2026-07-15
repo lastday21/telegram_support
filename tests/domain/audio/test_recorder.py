@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import types
 
 import pytest
@@ -54,6 +55,13 @@ def test_start_creates_process(recorder, fake_popen):
     assert "-ac" in cmd
 
 
+def test_start_rejects_second_process(recorder, fake_popen):
+    recorder.start()
+
+    with pytest.raises(RuntimeError, match="уже запущена"):
+        recorder.start()
+
+
 def test_stop_returns_recorded_file(recorder, fake_popen):
     recorder.start()
     assert recorder.filepath is not None
@@ -83,3 +91,42 @@ def test_start_creates_records_directory(monkeypatch, recorder, fake_popen, tmp_
     recorder.start()
 
     assert (tmp_path / RECORDS_DIR).is_dir()
+
+
+def test_stop_terminates_stuck_ffmpeg(monkeypatch, recorder, tmp_path):
+    calls = {"waits": 0}
+
+    class _Stdin:
+        def write(self, _data):
+            pass
+
+        def flush(self):
+            pass
+
+    class _Proc:
+        stdin = _Stdin()
+        stderr = types.SimpleNamespace(read=lambda: b"")
+        returncode = 0
+
+        def wait(self, timeout=None):
+            calls["waits"] += 1
+            if calls["waits"] == 1:
+                raise subprocess.TimeoutExpired("ffmpeg", timeout)
+            return 0
+
+        def terminate(self):
+            calls["terminated"] = True
+
+        def kill(self):
+            calls["killed"] = True
+
+    monkeypatch.setattr("app.domain.audio.recorder.Path.cwd", lambda: tmp_path)
+    recorder.proc = _Proc()  # type: ignore[assignment]
+    recorder.filepath = tmp_path / "record.wav"
+
+    with pytest.raises(RuntimeError, match="принудительно"):
+        recorder.stop()
+
+    assert recorder.proc is None
+    assert calls["terminated"] is True
+    assert "killed" not in calls

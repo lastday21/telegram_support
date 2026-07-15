@@ -24,7 +24,7 @@ repos:
 
       - id: pytest
         name: pytest
-        entry: python -m pytest -q --basetemp=.pytest-temp-pre-commit
+        entry: python -m pytest -q
         language: system
         pass_filenames: false
         stages: [pre-commit]

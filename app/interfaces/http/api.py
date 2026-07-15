@@ -15,7 +15,7 @@ from app.interfaces.telegram.sender import send_message, send_photo
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
-MAX_AUDIO_SIZE = 1_000_000
+MAX_AUDIO_SIZE = 20 * 1024 * 1024
 MAX_IMAGE_SIZE = 10 * 1024 * 1024
 
 
