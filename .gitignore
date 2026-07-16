@@ -21,6 +21,7 @@ build/
 *.exe
 *.pkg
 *.ico
+!icon.ico
 .pytest-temp/
 record_*.wav
 records/
