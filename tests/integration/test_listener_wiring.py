@@ -15,7 +15,6 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
         solve_text=lambda _text: "answer",
         solve_image=lambda _image, _prompt: "answer",
         send_message=lambda _text: None,
-        send_photo=lambda _photo, _caption=None: None,
         ping=lambda: True,
     )
     monkeypatch.setattr(

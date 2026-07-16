@@ -55,7 +55,6 @@ def test_toggle_rec_start_and_stop(tmp_path):
 def test_handler_screenshot_flow():
     ctx = {
         "messages": [],
-        "photos": [],
         "solve_image": [],
     }
     service = HotkeyService(
@@ -64,15 +63,11 @@ def test_handler_screenshot_flow():
             ctx["solve_image"].append((img, prompt)) or "IMG ANSWER"
         ),
         send_message_fn=lambda text: ctx["messages"].append(text),
-        send_photo_fn=lambda photo, caption=None: ctx["photos"].append(
-            (photo, caption)
-        ),
         take_screenshot_fn=lambda: b"PNG_BYTES",
     )
 
     service.handle_prompt("PROMPT_X")
 
-    assert ctx["photos"] == [(b"PNG_BYTES", "PROMPT_X")]
     assert ctx["solve_image"] == [(b"PNG_BYTES", "PROMPT_X")]
     assert ctx["messages"] == ["IMG ANSWER"]
 

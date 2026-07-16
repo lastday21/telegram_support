@@ -1,5 +1,6 @@
 services:
   server:
+    image: ghcr.io/lastday21/telegram_support:latest
     build:
       context: .
     env_file:
@@ -10,6 +11,7 @@ services:
     restart: unless-stopped
 
   telegram-bot:
+    image: ghcr.io/lastday21/telegram_support:latest
     build:
       context: .
     env_file:

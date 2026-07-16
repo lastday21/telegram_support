@@ -17,7 +17,11 @@ from app.infra.remote_client import build_remote_client
 from app.prompts import PROMPTS
 from app.settings import get_client_settings
 
-FIXED_PROMPT = "Дай развёрнутый полезный ответ для следующего текста или вопроса: "
+FIXED_PROMPT = (
+    "Ниже распознан вопрос или условие задания. Определи, что требуется, "
+    "и дай правильный ответ. Сначала напиши итог, затем краткое объяснение. "
+    "Если это тест, укажи вариант и его текст. Текст: "
+)
 HOTKEY_DEBOUNCE_SECONDS = 0.45
 
 StatusCallback = Callable[[AppStatus, str, bool], None]
@@ -55,7 +59,6 @@ class HotkeyService:
         solve_text_fn: Callable[[str], str] | None = None,
         solve_image_fn: Callable[[bytes, str], str] | None = None,
         send_message_fn: Callable[[str], None] | None = None,
-        send_photo_fn: Callable[[bytes, str | None], None] | None = None,
         take_screenshot_fn: Callable[[], bytes] | None = None,
         ping_fn: Callable[[], bool] | None = None,
         status_callback: StatusCallback | None = None,
@@ -69,7 +72,6 @@ class HotkeyService:
         self.solve_text = solve_text_fn or _missing_server_client
         self.solve_image = solve_image_fn or _missing_server_client
         self.send_message = send_message_fn or _missing_server_client
-        self.send_photo = send_photo_fn or _missing_server_client
         self.take_screenshot = take_screenshot_fn or _default_take_screenshot
         self.ping = ping_fn
         self.status_callback = status_callback
@@ -164,7 +166,6 @@ class HotkeyService:
         self._report(AppStatus.WORKING, "Обрабатываю снимок экрана")
         try:
             image = self.take_screenshot()
-            self.send_photo(image, prompt)
             answer = self.solve_image(image, prompt)
             self.send_message(answer)
             self._report(AppStatus.READY, "Ответ по снимку готов", True)
@@ -351,7 +352,6 @@ def build_hotkey_service(
         solve_text_fn=remote_client.solve_text,
         solve_image_fn=remote_client.solve_image,
         send_message_fn=remote_client.send_message,
-        send_photo_fn=remote_client.send_photo,
         ping_fn=remote_client.ping,
         status_callback=status_callback,
     )

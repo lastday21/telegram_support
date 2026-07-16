@@ -142,6 +142,30 @@ pyinstaller --clean build.spec
 %APPDATA%\SmartHelper\.env
 ```
 
+## Автоматическая проверка и сборка
+
+После отправки изменений в `main` GitHub автоматически:
+
+- проверяет оформление и типы;
+- запускает тесты;
+- собирает и публикует серверный образ
+  `ghcr.io/lastday21/telegram_support:latest`;
+- собирает `SmartHelper.exe` и сохраняет его в результатах запуска под именем
+  `SmartHelper-Windows` на 14 дней.
+
+Чтобы обновить сервер из опубликованного образа:
+
+```powershell
+docker compose pull
+docker compose up -d --no-build
+```
+
+Для локальной сборки из исходников по-прежнему используется:
+
+```powershell
+docker compose up -d --build
+```
+
 ## Сервер на другом компьютере
 
 Если Docker работает не на том же компьютере, перед сервером нужно настроить
