@@ -14,8 +14,15 @@ from app.domain.audio.recorder import VoiceRecorder
 from app.domain.status import AppStatus
 from app.infra.audio_devices import pick_default_devices
 from app.infra.remote_client import build_remote_client
-from app.prompts import PROMPTS
-from app.settings import get_client_settings
+from app.interfaces.hotkeys.middle_click import MiddleClickHook
+from app.settings import (
+    DEFAULT_ACTION_HOTKEYS,
+    DEFAULT_ACTION_PROMPTS,
+    DEFAULT_MOUSE_PROMPT,
+    DEFAULT_RECORD_HOTKEY,
+    ClientSettings,
+    get_client_settings,
+)
 
 FIXED_PROMPT = (
     "Ниже распознан вопрос или условие задания. Определи, что требуется, "
@@ -64,8 +71,12 @@ class HotkeyService:
         status_callback: StatusCallback | None = None,
         action_queue: ActionQueue | None = None,
         clock: Callable[[], float] = time.monotonic,
-        prompts: Sequence[str] = PROMPTS,
+        prompts: Sequence[str] = DEFAULT_ACTION_PROMPTS,
         fixed_prompt: str = FIXED_PROMPT,
+        record_hotkey: str = DEFAULT_RECORD_HOTKEY,
+        mouse_prompt: str = DEFAULT_MOUSE_PROMPT,
+        action_hotkeys: Sequence[str] = DEFAULT_ACTION_HOTKEYS,
+        middle_click_factory: Callable[[Callable[[], object]], Any] = MiddleClickHook,
     ) -> None:
         self.recorder = recorder
         self.transcribe = transcribe_fn or _missing_server_client
@@ -77,12 +88,17 @@ class HotkeyService:
         self.status_callback = status_callback
         self.prompts = list(prompts)
         self.fixed_prompt = fixed_prompt
+        self.record_hotkey = record_hotkey
+        self.mouse_prompt = mouse_prompt
+        self.action_hotkeys = list(action_hotkeys)
         self.is_recording = False
         self._processing = False
         self._state_lock = threading.Lock()
         self._clock = clock
         self._last_hotkey_at: dict[str, float] = {}
         self._keyboard_impl = None
+        self._middle_click_factory = middle_click_factory
+        self._middle_click_hook: Any | None = None
         self._closed = False
         self.action_queue = action_queue or SerialActionQueue(
             on_error=self._handle_queue_error
@@ -207,6 +223,13 @@ class HotkeyService:
             (prompt,),
         )
 
+    def submit_mouse_prompt(self) -> bool:
+        return self._submit_hotkey(
+            "mouse-prompt",
+            self.handle_prompt,
+            (self.mouse_prompt,),
+        )
+
     def submit_check_server(self) -> bool:
         accepted = self.action_queue.submit(self.check_server)
         if not accepted:
@@ -224,26 +247,30 @@ class HotkeyService:
         self._keyboard_impl = keyboard_impl
 
         if thread_factory is None:
-            keyboard_impl.add_hotkey("alt+q", self.submit_toggle_recording)
-            for index, prompt in enumerate(self.prompts, start=1):
+            keyboard_impl.add_hotkey(self.record_hotkey, self.submit_toggle_recording)
+            for index, (hotkey, prompt) in enumerate(
+                zip(self.action_hotkeys, self.prompts, strict=True), start=1
+            ):
                 keyboard_impl.add_hotkey(
-                    f"alt+{index}",
+                    hotkey,
                     lambda prompt_text=prompt, prompt_index=index: self.submit_prompt(
                         prompt_text, prompt_index
                     ),
                 )
+            self._register_middle_click()
             return
 
         keyboard_impl.add_hotkey(
-            "alt+q", lambda: thread_factory(self.toggle_recording, ())
+            self.record_hotkey, lambda: thread_factory(self.toggle_recording, ())
         )
-        for index, prompt in enumerate(self.prompts, start=1):
+        for hotkey, prompt in zip(self.action_hotkeys, self.prompts, strict=True):
             keyboard_impl.add_hotkey(
-                f"alt+{index}",
+                hotkey,
                 lambda prompt_text=prompt: thread_factory(
                     self.handle_prompt, (prompt_text,)
                 ),
             )
+        self._register_middle_click()
 
     def run(
         self,
@@ -255,7 +282,7 @@ class HotkeyService:
         if keyboard_impl is None:
             raise RuntimeError("Пакет keyboard не установлен")
 
-        print("Готово: Alt+Q — запись, Alt+1–Alt+9 — снимок экрана")
+        print(f"Готово: {self.record_hotkey} — запись, колёсико — ответ по экрану")
         self.register_hotkeys(
             keyboard_module_override=keyboard_impl,
             thread_factory=thread_factory,
@@ -274,12 +301,25 @@ class HotkeyService:
             return
         self._closed = True
         self.action_queue.close()
+        self._unregister_middle_click()
         keyboard_impl = self._keyboard_impl
         if keyboard_impl is not None and hasattr(keyboard_impl, "unhook_all_hotkeys"):
             keyboard_impl.unhook_all_hotkeys()
         if self.is_recording and hasattr(self.recorder, "abort"):
             self.recorder.abort()
         self.is_recording = False
+
+    def _register_middle_click(self) -> None:
+        if self._middle_click_hook is not None:
+            return
+        hook = self._middle_click_factory(self.submit_mouse_prompt)
+        hook.start()
+        self._middle_click_hook = hook
+
+    def _unregister_middle_click(self) -> None:
+        if self._middle_click_hook is not None:
+            self._middle_click_hook.stop()
+        self._middle_click_hook = None
 
     def _submit_hotkey(
         self,
@@ -331,11 +371,13 @@ class HotkeyService:
         self._report_error("Не удалось выполнить действие", exc)
 
 
-def _resolve_devices() -> tuple[str, str]:
-    settings = get_client_settings()
+def _resolve_devices(
+    settings: ClientSettings | None = None,
+) -> tuple[str, str | None]:
+    settings = settings or get_client_settings()
     mic_env = settings.mic_device or os.getenv("MIC_DEVICE")
     mix_env = settings.mix_device or os.getenv("MIX_DEVICE")
-    if mic_env and mix_env:
+    if mic_env:
         return mic_env, mix_env
     return pick_default_devices()
 
@@ -343,9 +385,10 @@ def _resolve_devices() -> tuple[str, str]:
 def build_hotkey_service(
     status_callback: StatusCallback | None = None,
 ) -> HotkeyService:
-    mic_device, mix_device = _resolve_devices()
+    settings = get_client_settings()
+    mic_device, mix_device = _resolve_devices(settings)
     recorder = VoiceRecorder(mic_device=mic_device, mix_device=mix_device)
-    remote_client = build_remote_client()
+    remote_client = build_remote_client(settings)
     return HotkeyService(
         recorder=recorder,
         transcribe_fn=remote_client.transcribe,
@@ -354,6 +397,10 @@ def build_hotkey_service(
         send_message_fn=remote_client.send_message,
         ping_fn=remote_client.ping,
         status_callback=status_callback,
+        record_hotkey=settings.record_hotkey,
+        mouse_prompt=settings.mouse_prompt,
+        action_hotkeys=settings.action_hotkeys,
+        prompts=settings.action_prompts,
     )
 
 

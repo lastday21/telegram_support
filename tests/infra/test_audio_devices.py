@@ -24,8 +24,11 @@ def fake_ffmpeg(monkeypatch):
         def __init__(self, *_, **__):
             self.stderr = body["text"].encode("utf-8")
 
+    monkeypatch.setattr(ad, "ffmpeg_executable", lambda: "ffmpeg.exe")
     monkeypatch.setattr(ad.subprocess, "run", lambda *a, **k: _FakeProc())
-    return body
+    ad.list_audio_devices.cache_clear()
+    yield body
+    ad.list_audio_devices.cache_clear()
 
 
 # ──────────────── TESTS ─────────────────────────────────────────────
@@ -39,12 +42,28 @@ def test_list_audio_devices(fake_ffmpeg):
 def test_pick_default_devices(fake_ffmpeg):
     mic, mix = ad.pick_default_devices()
     assert "микрофон" in mic.lower() or "microphone" in mic.lower()
+    assert mix is not None
     assert "микшер" in mix.lower() or "mix" in mix.lower()
 
 
-def test_no_mixer_error(fake_ffmpeg):
+def test_microphone_without_mixer_is_supported(fake_ffmpeg):
+    fake_ffmpeg["text"] = fake_ffmpeg["text"].replace(
+        '  "Стерео микшер (audio)"\n',
+        "",
+    )
+
+    mic, mix = ad.pick_default_devices()
+
+    assert "микрофон" in mic.lower()
+    assert mix is None
+
+
+def test_no_microphone_error(fake_ffmpeg):
     body_text = fake_ffmpeg["text"]
     fake_ffmpeg["text"] = body_text.replace(
         '  "Микрофон (audio)"\n',  # ← две пробелы перед кавычкой
         "",
     )
+
+    with pytest.raises(RuntimeError, match="микрофон"):
+        ad.pick_default_devices()

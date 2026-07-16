@@ -1,20 +1,55 @@
-import threading
+from __future__ import annotations
+
+import ctypes
+import os
 
 from app.interfaces.hotkeys.listener import build_hotkey_service
-from app.interfaces.tray import TrayController
+
+ALREADY_EXISTS = 183
+
+
+def acquire_single_instance():
+    if os.name != "nt":
+        return True
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    handle = kernel32.CreateMutexW(None, False, "SmartHelper.Main.Instance")
+    if not handle or kernel32.GetLastError() == ALREADY_EXISTS:
+        if handle:
+            kernel32.CloseHandle(handle)
+        return None
+    return handle
+
+
+def show_startup_error(message: str) -> None:
+    if os.name == "nt":
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            message,
+            "SmartHelper — ошибка запуска",
+            0x10,
+        )
+    else:
+        print(message)
 
 
 def main() -> None:
-    stop_event = threading.Event()
-    tray = TrayController(on_exit=stop_event.set)
-    service = build_hotkey_service(status_callback=tray.update)
-    tray.set_check_handler(service.submit_check_server)
-    tray.start()
+    instance = acquire_single_instance()
+    if instance is None:
+        return
     try:
-        service.run(stop_event=stop_event)
+        service = build_hotkey_service()
+    except Exception as exc:
+        show_startup_error(str(exc))
+        if os.name == "nt" and instance is not True:
+            ctypes.windll.kernel32.CloseHandle(instance)
+        return
+    try:
+        service.run()
     finally:
         service.close()
-        tray.stop()
+        if os.name == "nt" and instance is not True:
+            ctypes.windll.kernel32.CloseHandle(instance)
 
 
 if __name__ == "__main__":

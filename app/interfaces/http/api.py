@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from pydantic import BaseModel, Field
 
 from app.infra.yandex_gpt import solve_image, solve_text
+from app.settings import SUPPORTED_YC_MODELS
 from app.infra.yandex_stt import transcribe
 from app.interfaces.telegram.sender import send_message, send_photo
 from app.settings import get_settings
@@ -21,6 +22,7 @@ MAX_IMAGE_SIZE = 10 * 1024 * 1024
 
 class TextRequest(BaseModel):
     text: str = Field(min_length=3, max_length=50_000)
+    model: str | None = None
 
 
 class MessageRequest(BaseModel):
@@ -38,8 +40,8 @@ def _read_limited(upload: UploadFile, limit: int) -> bytes:
 
 def create_app(
     access_token: str | None = None,
-    solve_text_fn: Callable[[str], str] = solve_text,
-    solve_image_fn: Callable[[bytes, str], str] = solve_image,
+    solve_text_fn: Callable[[str, str | None], str] = solve_text,
+    solve_image_fn: Callable[[bytes, str, str | None], str] = solve_image,
     transcribe_fn: Callable[[Path], str] = transcribe,
     send_message_fn: Callable[[str], None] = send_message,
     send_photo_fn: Callable[[bytes, str | None], None] = send_photo,
@@ -64,16 +66,23 @@ def create_app(
     def protected_ping() -> dict[str, str]:
         return {"status": "ok"}
 
+    def validate_model(model: str | None) -> str | None:
+        if model is not None and model not in SUPPORTED_YC_MODELS:
+            raise HTTPException(status_code=422, detail="Модель не поддерживается")
+        return model
+
     @application.post("/v1/text", dependencies=[Depends(require_access)])
     def text_answer(request: TextRequest) -> dict[str, str]:
-        return {"answer": solve_text_fn(request.text)}
+        return {"answer": solve_text_fn(request.text, validate_model(request.model))}
 
     @application.post("/v1/image", dependencies=[Depends(require_access)])
     def image_answer(
-        image: UploadFile = File(...), prompt: str = Form(...)
+        image: UploadFile = File(...),
+        prompt: str = Form(...),
+        model: str | None = Form(None),
     ) -> dict[str, str]:
         image_bytes = _read_limited(image, MAX_IMAGE_SIZE)
-        return {"answer": solve_image_fn(image_bytes, prompt)}
+        return {"answer": solve_image_fn(image_bytes, prompt, validate_model(model))}
 
     @application.post("/v1/transcribe", dependencies=[Depends(require_access)])
     def audio_text(audio: UploadFile = File(...)) -> dict[str, str]:

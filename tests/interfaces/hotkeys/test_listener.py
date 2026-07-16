@@ -106,3 +106,47 @@ def test_hotkey_repeat_is_ignored():
     assert service.submit_toggle_recording() is True
     assert service.submit_toggle_recording() is False
     assert len(submitted) == 1
+
+
+def test_middle_click_submits_universal_prompt():
+    submitted = []
+    stopped = []
+
+    class _Queue:
+        def submit(self, target, args=()):
+            submitted.append((target, args))
+            return True
+
+        def close(self):
+            pass
+
+    class _MouseHook:
+        def __init__(self, handler):
+            self.handler = handler
+
+        def start(self):
+            self.handler()
+
+        def stop(self):
+            stopped.append(True)
+
+    class _Keyboard:
+        def add_hotkey(self, combo, handler):
+            pass
+
+        def unhook_all_hotkeys(self):
+            pass
+
+    service = HotkeyService(
+        recorder=_FakeRecorder(None),
+        prompts=["Команда"],
+        action_hotkeys=["ctrl+1"],
+        mouse_prompt="Универсальный",
+        action_queue=_Queue(),
+        middle_click_factory=_MouseHook,
+    )
+    service.register_hotkeys(keyboard_module_override=_Keyboard())
+
+    assert submitted[0][1] == ("Универсальный",)
+    service.close()
+    assert stopped == [True]

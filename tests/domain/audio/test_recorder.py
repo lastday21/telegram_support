@@ -32,6 +32,10 @@ def fake_popen(monkeypatch):
     monkeypatch.setattr(
         "app.domain.audio.recorder.subprocess.Popen", _FakeProc, raising=True
     )
+    monkeypatch.setattr(
+        "app.domain.audio.recorder.ffmpeg_executable",
+        lambda: "ffmpeg.exe",
+    )
     return calls
 
 
@@ -60,6 +64,16 @@ def test_start_rejects_second_process(recorder, fake_popen):
 
     with pytest.raises(RuntimeError, match="уже запущена"):
         recorder.start()
+
+
+def test_start_supports_microphone_without_mixer(fake_popen):
+    recorder = VoiceRecorder(mic_device="MicDevice", mix_device=None)
+
+    recorder.start()
+
+    cmd = fake_popen["cmd"]
+    assert "audio=MicDevice" in cmd
+    assert "-filter_complex" not in cmd
 
 
 def test_stop_returns_recorded_file(recorder, fake_popen):

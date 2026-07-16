@@ -20,9 +20,11 @@ def _build_client(calls: dict) -> TestClient:
 
     application = create_app(
         access_token="SECRET",
-        solve_text_fn=lambda text: calls.setdefault("text", text) or "Ответ",
-        solve_image_fn=lambda image, prompt: (
-            calls.update(image=image, prompt=prompt) or "Ответ по снимку"
+        solve_text_fn=lambda text, model: (
+            calls.update(text=text, model=model) or "Ответ"
+        ),
+        solve_image_fn=lambda image, prompt, model: (
+            calls.update(image=image, prompt=prompt, model=model) or "Ответ по снимку"
         ),
         transcribe_fn=transcribe,
         send_message_fn=lambda text: calls.setdefault("message", text),
@@ -56,12 +58,17 @@ def test_text_endpoint_requires_valid_token():
     client = _build_client(calls)
 
     denied = client.post("/v1/text", json={"text": "Вопрос"})
-    allowed = client.post("/v1/text", headers=AUTH, json={"text": "Вопрос"})
+    allowed = client.post(
+        "/v1/text",
+        headers=AUTH,
+        json={"text": "Вопрос", "model": "aliceai-llm/latest"},
+    )
 
     assert denied.status_code == 401
     assert allowed.status_code == 200
-    assert allowed.json() == {"answer": "Вопрос"}
+    assert allowed.json() == {"answer": "Ответ"}
     assert calls["text"] == "Вопрос"
+    assert calls["model"] == "aliceai-llm/latest"
 
 
 def test_image_and_audio_are_passed_to_services():
@@ -71,7 +78,7 @@ def test_image_and_audio_are_passed_to_services():
     image_response = client.post(
         "/v1/image",
         headers=AUTH,
-        data={"prompt": "Объясни"},
+        data={"prompt": "Объясни", "model": "deepseek-v32/latest"},
         files={"image": ("screen.png", b"PNG", "image/png")},
     )
     audio_response = client.post(
@@ -84,7 +91,20 @@ def test_image_and_audio_are_passed_to_services():
     assert audio_response.json() == {"text": "Распознанный текст"}
     assert calls["image"] == b"PNG"
     assert calls["prompt"] == "Объясни"
+    assert calls["model"] == "deepseek-v32/latest"
     assert calls["audio"] == b"WAV"
+
+
+def test_unknown_model_is_rejected():
+    client = _build_client({})
+
+    response = client.post(
+        "/v1/text",
+        headers=AUTH,
+        json={"text": "Вопрос", "model": "unknown/latest"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_telegram_actions_are_proxied():

@@ -17,12 +17,25 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
         send_message=lambda _text: None,
         ping=lambda: True,
     )
+    settings = types.SimpleNamespace(
+        mic_device=None,
+        mix_device=None,
+        server_url="http://server",
+        app_access_token="TOKEN",
+        yc_model="qwen3-235b-a22b-fp8/latest",
+        record_hotkey="alt+q",
+        mouse_prompt="Мышь",
+        action_hotkeys=("ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5"),
+        action_prompts=("A", "B", "C", "D", "E"),
+    )
     monkeypatch.setattr(
         listener,
         "get_client_settings",
-        lambda: types.SimpleNamespace(mic_device=None, mix_device=None),
+        lambda: settings,
     )
-    monkeypatch.setattr(listener, "build_remote_client", lambda: remote_client)
+    monkeypatch.setattr(
+        listener, "build_remote_client", lambda _settings: remote_client
+    )
     monkeypatch.setattr(listener, "pick_default_devices", lambda: ("MIC", "MIX"))
     monkeypatch.setattr(listener, "VoiceRecorder", _FakeRecorder)
 
@@ -30,7 +43,7 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
 
     assert service.recorder.mic_device == "MIC"
     assert service.recorder.mix_device == "MIX"
-    assert service.prompts == listener.PROMPTS
+    assert service.prompts == ["A", "B", "C", "D", "E"]
     assert service.solve_text("question") == "answer"
     assert service.ping() is True
 
@@ -43,15 +56,28 @@ def test_register_hotkeys_binds_all_prompts():
         def add_hotkey(self, combo, handler):
             registered.append((combo, handler))
 
+    class _MouseHook:
+        def __init__(self, handler):
+            self.handler = handler
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
     service = listener.HotkeyService(
-        recorder=_FakeRecorder("MIC", "MIX"), prompts=["A", "B"]
+        recorder=_FakeRecorder("MIC", "MIX"),
+        prompts=["A", "B"],
+        action_hotkeys=["ctrl+1", "ctrl+2"],
+        middle_click_factory=_MouseHook,
     )
     service.register_hotkeys(
         keyboard_module_override=_Keyboard(),
         thread_factory=lambda target, args: launched.append((target, args)),
     )
 
-    assert [combo for combo, _ in registered] == ["alt+q", "alt+1", "alt+2"]
+    assert [combo for combo, _ in registered] == ["alt+q", "ctrl+1", "ctrl+2"]
     registered[1][1]()
     assert launched[0][1] == ("A",)
 

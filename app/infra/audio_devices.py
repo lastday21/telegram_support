@@ -8,23 +8,24 @@ import re
 import subprocess
 from functools import lru_cache
 
-_DSHOW_CMD = [
-    "ffmpeg",
-    "-hide_banner",
-    "-list_devices",
-    "true",
-    "-f",
-    "dshow",
-    "-i",
-    "dummy",
-]
+from app.infra.ffmpeg import ffmpeg_executable
 
 
 @lru_cache(maxsize=1)
 def list_audio_devices() -> list[str]:
     """Возвращает список имён всех аудио-устройств DirectShow."""
+    command = [
+        ffmpeg_executable(),
+        "-hide_banner",
+        "-list_devices",
+        "true",
+        "-f",
+        "dshow",
+        "-i",
+        "dummy",
+    ]
     proc = subprocess.run(
-        _DSHOW_CMD,
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,  # нужен stderr
         check=False,
@@ -41,9 +42,10 @@ def list_audio_devices() -> list[str]:
     return devices
 
 
-def pick_default_devices() -> tuple[str, str]:
+def pick_default_devices() -> tuple[str, str | None]:
     """
-    Возвращает (mic_device, mix_device).
+    Возвращает (mic_device, mix_device). Если Stereo Mix отключён, второе
+    значение будет None и запись продолжится только с микрофона.
 
     mic  — строка, содержащая «микрофон»/«microphone»
     mix  — строка, содержащая «stereo mix» или оба слова «стерео» и «микшер»
@@ -71,12 +73,11 @@ def pick_default_devices() -> tuple[str, str]:
         None,
     )
 
-    if not mic or not mix:
+    if not mic:
         raise RuntimeError(
             "Автопоиск устройств не удался.\n"
             f"Найдено: {devs or 'ничего'}\n"
-            "Включи Stereo Mix в «Панель управления → Звук → Запись» "
-            "или задай MIC_DEVICE/MIX_DEVICE через переменные окружения."
+            "Подключите микрофон или задайте MIC_DEVICE в настройках запуска."
         )
 
     return mic, mix

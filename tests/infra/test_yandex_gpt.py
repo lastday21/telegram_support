@@ -1,4 +1,4 @@
-from app.infra.yandex_gpt import DEFAULT_SYSTEM, YandexGPTClient
+from app.infra.yandex_gpt import API_URL, DEFAULT_MODEL, DEFAULT_SYSTEM, YandexGPTClient
 
 
 class _FakeResp:
@@ -27,17 +27,18 @@ def test_solve_text_calls_gpt():
         calls["headers"] = headers
         calls["json"] = json
         calls["timeout"] = timeout
-        return _FakeResp(
-            {"result": {"alternatives": [{"message": {"text": "ANSWER"}}]}}
-        )
+        return _FakeResp({"choices": [{"message": {"content": "ANSWER"}}]})
 
     client = YandexGPTClient(api_key="KEY", folder_id="FOLDER", http_post=_fake_http)
 
     out = client.solve_text("How to sort list?")
 
     assert out == "ANSWER"
-    assert calls["json"]["messages"][1]["text"] == "How to sort list?"
-    assert calls["json"]["messages"][0]["text"] == DEFAULT_SYSTEM
+    assert calls["url"] == API_URL
+    assert calls["headers"]["OpenAI-Project"] == "FOLDER"
+    assert calls["json"]["model"] == f"gpt://FOLDER/{DEFAULT_MODEL}"
+    assert calls["json"]["messages"][1]["content"] == "How to sort list?"
+    assert calls["json"]["messages"][0]["content"] == DEFAULT_SYSTEM
 
 
 def test_solve_image_success():
@@ -48,10 +49,8 @@ def test_solve_image_success():
         return "SELECT * FROM table;"
 
     def _fake_http(url, headers, json, timeout):
-        calls["prompt"] = json["messages"][1]["text"]
-        return _FakeResp(
-            {"result": {"alternatives": [{"message": {"text": "SQL explanation"}}]}}
-        )
+        calls["prompt"] = json["messages"][1]["content"]
+        return _FakeResp({"choices": [{"message": {"content": "SQL explanation"}}]})
 
     client = YandexGPTClient(
         api_key="KEY",
@@ -76,3 +75,14 @@ def test_solve_image_no_text():
     )
 
     assert client.solve_image(b"bytes") == "Не удалось распознать текст на изображении."
+
+
+def test_full_model_uri_is_used_as_is():
+    model_uri = "gpt://ANOTHER_FOLDER/aliceai-llm/latest"
+    client = YandexGPTClient(
+        api_key="KEY",
+        folder_id="FOLDER",
+        model=model_uri,
+    )
+
+    assert client.model_uri == model_uri

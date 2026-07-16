@@ -141,6 +141,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SmartHelper-Windows
-          path: dist/SmartHelper.exe
+          path: dist/*.exe
           if-no-files-found: error
           retention-days: 14

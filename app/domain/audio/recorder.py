@@ -2,13 +2,15 @@ from datetime import datetime
 from pathlib import Path
 import subprocess
 
+from app.infra.ffmpeg import ffmpeg_executable
+
 RECORDS_DIR = "records"
 GRACEFUL_STOP_TIMEOUT = 5
 TERMINATE_TIMEOUT = 2
 
 
 class VoiceRecorder:
-    def __init__(self, mic_device: str, mix_device: str):
+    def __init__(self, mic_device: str, mix_device: str | None):
         self.mic = mic_device
         self.mix = mix_device
         self.proc: subprocess.Popen | None = None
@@ -25,26 +27,27 @@ class VoiceRecorder:
         self.filepath = out
 
         cmd = [
-            "ffmpeg",
+            ffmpeg_executable(),
             "-y",
             "-loglevel",
             "error",
             "-f",
             "dshow",
             "-i",
-            f"audio={self.mix}",
-            "-f",
-            "dshow",
-            "-i",
             f"audio={self.mic}",
-            "-filter_complex",
-            "amix=inputs=2:normalize=0",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            str(out),
         ]
+        if self.mix:
+            cmd.extend(
+                [
+                    "-f",
+                    "dshow",
+                    "-i",
+                    f"audio={self.mix}",
+                    "-filter_complex",
+                    "amix=inputs=2:normalize=0",
+                ]
+            )
+        cmd.extend(["-ac", "1", "-ar", "16000", str(out)])
         print("🔴 REC start ", out.name)
         print("CMD:", subprocess.list2cmdline(cmd))
 

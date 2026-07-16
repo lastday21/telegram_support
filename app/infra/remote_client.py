@@ -4,7 +4,7 @@ from pathlib import Path
 
 import requests
 
-from app.settings import get_client_settings
+from app.settings import DEFAULT_YC_MODEL, ClientSettings, get_client_settings
 
 
 class RemoteServiceClient:
@@ -17,6 +17,7 @@ class RemoteServiceClient:
         timeout: int = 120,
         audio_timeout: int = 600,
         ping_timeout: int = 5,
+        model: str = DEFAULT_YC_MODEL,
     ) -> None:
         self.server_url = server_url.rstrip("/")
         self.http_post = http_post
@@ -24,7 +25,11 @@ class RemoteServiceClient:
         self.timeout = timeout
         self.audio_timeout = audio_timeout
         self.ping_timeout = ping_timeout
+        self.model = model
         self.headers = {"Authorization": f"Bearer {access_token}"}
+
+    def set_model(self, model: str) -> None:
+        self.model = model
 
     def _post(self, path: str, **kwargs):
         headers = dict(self.headers)
@@ -49,13 +54,13 @@ class RemoteServiceClient:
         return response.json().get("status") == "ok"
 
     def solve_text(self, text: str) -> str:
-        response = self._post("/v1/text", json={"text": text})
+        response = self._post("/v1/text", json={"text": text, "model": self.model})
         return str(response.json()["answer"])
 
     def solve_image(self, image: bytes, prompt: str) -> str:
         response = self._post(
             "/v1/image",
-            data={"prompt": prompt},
+            data={"prompt": prompt, "model": self.model},
             files={"image": ("screenshot.png", image, "image/png")},
         )
         return str(response.json()["answer"])
@@ -80,6 +85,10 @@ class RemoteServiceClient:
         )
 
 
-def build_remote_client() -> RemoteServiceClient:
-    settings = get_client_settings()
-    return RemoteServiceClient(settings.server_url, settings.app_access_token)
+def build_remote_client(settings: ClientSettings | None = None) -> RemoteServiceClient:
+    selected_settings = settings or get_client_settings()
+    return RemoteServiceClient(
+        selected_settings.server_url,
+        selected_settings.app_access_token,
+        model=selected_settings.yc_model,
+    )

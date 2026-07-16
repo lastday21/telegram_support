@@ -29,7 +29,25 @@ def test_remote_client_sends_token_and_text():
     assert client.solve_text("Вопрос") == "Ответ"
     assert calls["url"] == "https://helper.example/v1/text"
     assert calls["kwargs"]["headers"] == {"Authorization": "Bearer SECRET"}
-    assert calls["kwargs"]["json"] == {"text": "Вопрос"}
+    assert calls["kwargs"]["json"] == {
+        "text": "Вопрос",
+        "model": "qwen3-235b-a22b-fp8/latest",
+    }
+
+
+def test_remote_client_can_change_model():
+    calls = {}
+
+    def fake_post(url, **kwargs):
+        calls["json"] = kwargs["json"]
+        return _FakeResponse({"answer": "Ответ"})
+
+    client = RemoteServiceClient("http://server", "SECRET", http_post=fake_post)
+    client.set_model("aliceai-llm/latest")
+
+    client.solve_text("Вопрос")
+
+    assert calls["json"]["model"] == "aliceai-llm/latest"
 
 
 def test_remote_client_sends_audio_file(tmp_path: Path):
