@@ -4,6 +4,8 @@ import os
 import threading
 from collections.abc import Callable
 
+from app.infra.windows_api import get_last_error, load_library, make_function_type
+
 
 class MiddleClickHook:
     def __init__(self, callback: Callable[[], object]) -> None:
@@ -32,9 +34,8 @@ class MiddleClickHook:
     def stop(self) -> None:
         if not self._thread_id:
             return
-        import ctypes
 
-        ctypes.windll.user32.PostThreadMessageW(self._thread_id, 0x0012, 0, 0)
+        load_library("user32").PostThreadMessageW(self._thread_id, 0x0012, 0, 0)
         thread = self._thread
         if thread is not None:
             thread.join(timeout=2)
@@ -45,13 +46,13 @@ class MiddleClickHook:
         import ctypes
         from ctypes import wintypes
 
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
+        user32 = load_library("user32")
+        kernel32 = load_library("kernel32")
         hook_handle = None
 
         try:
             result_type = ctypes.c_ssize_t
-            hook_proc_type = ctypes.WINFUNCTYPE(
+            hook_proc_type = make_function_type(
                 result_type,
                 ctypes.c_int,
                 wintypes.WPARAM,
@@ -91,9 +92,7 @@ class MiddleClickHook:
                 0,
             )
             if not hook_handle:
-                raise OSError(
-                    ctypes.get_last_error(), "Не удалось перехватить колёсико"
-                )
+                raise OSError(get_last_error(), "Не удалось перехватить колёсико")
             self._ready.set()
 
             message = wintypes.MSG()
