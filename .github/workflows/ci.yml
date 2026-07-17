@@ -104,7 +104,6 @@ jobs:
           cache-to: type=gha,mode=max
 
   desktop-build:
-    if: github.event_name != 'pull_request'
     needs:
       - lint
       - tests
@@ -133,10 +132,97 @@ jobs:
       - name: Build Windows application
         run: uv run --frozen --extra client --no-dev --group build pyinstaller --clean build.spec
 
+      - name: Verify Windows application
+        shell: pwsh
+        run: |
+          $executables = @(
+            "dist/SmartHelper.exe",
+            "dist/SmartHelperSettings.exe"
+          )
+          foreach ($executable in $executables) {
+            $process = Start-Process `
+              -FilePath $executable `
+              -ArgumentList "--check" `
+              -Wait `
+              -PassThru `
+              -WindowStyle Hidden
+            if ($process.ExitCode -ne 0) {
+              throw "$executable failed self-check with code $($process.ExitCode)"
+            }
+          }
+
+      - name: Sign Windows application
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $certificateMissing = [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_CERTIFICATE_BASE64
+          ) -or [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_CERTIFICATE_PASSWORD
+          )
+          if ($certificateMissing) {
+            if ($env:GITHUB_REF -like "refs/tags/v*") {
+              throw "Signing certificate is required for a release tag"
+            }
+            Write-Host "Signing certificate is not configured; skipping signing"
+            exit 0
+          }
+
+          $certificatePath = Join-Path $env:RUNNER_TEMP "smarthelper-signing.pfx"
+          try {
+            $certificateBytes = [Convert]::FromBase64String(
+              $env:WINDOWS_CERTIFICATE_BASE64
+            )
+            [IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+            $signTool = Get-ChildItem `
+              -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+              -Filter signtool.exe `
+              -Recurse |
+              Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+            if ($null -eq $signTool) {
+              throw "signtool.exe was not found"
+            }
+            Get-ChildItem -Path dist -Filter *.exe | ForEach-Object {
+              & $signTool.FullName sign `
+                /fd SHA256 `
+                /f $certificatePath `
+                /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+                /tr http://timestamp.digicert.com `
+                /td SHA256 `
+                $_.FullName
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to sign $($_.Name)"
+              }
+            }
+          }
+          finally {
+            if (Test-Path -LiteralPath $certificatePath) {
+              Remove-Item -LiteralPath $certificatePath -Force
+            }
+          }
+
+      - name: Create checksums
+        shell: pwsh
+        run: |
+          $checksums = Get-ChildItem -Path dist -Filter *.exe |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+              "$($hash.ToLowerInvariant())  $($_.Name)"
+            }
+          $checksums | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
+
       - name: Upload Windows application
         uses: actions/upload-artifact@v4
         with:
           name: SmartHelper-Windows
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
