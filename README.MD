@@ -90,17 +90,28 @@ MIX_DEVICE=
 
 Если значения пустые, приложение попробует найти устройства само.
 
-Запуск из исходников:
+Для запуска из исходников установите `uv` и подготовьте клиентское окружение:
 
 ```powershell
-python -m app.desktop
+uv sync --frozen --extra client --no-dev
+```
+
+Запуск основной программы:
+
+```powershell
+uv run --frozen --extra client --no-dev python -m app.desktop
 ```
 
 Окно настроек запускается отдельно:
 
 ```powershell
-python -m app.settings_app
+uv run --frozen --extra client --no-dev python -m app.settings_app
 ```
+
+Если клиентский файл ещё не создан, окно настроек всё равно откроется. Укажите
+в нём адрес сервера и значение `APP_ACCESS_TOKEN` из серверного файла
+`.env.access`. После сохранения будет создан файл
+`%APPDATA%\SmartHelper\.env`.
 
 ## Горячие клавиши
 
@@ -114,6 +125,13 @@ python -m app.settings_app
 Снимок, распознанный текст и ответ передаются через сервер. Облачные ключи на
 компьютер с горячими клавишами не отправляются.
 
+Готовый ответ на 20 секунд появляется в правом верхнем углу экрана. Windows
+исключает это окно из обычной записи и демонстрации экрана. Перед снимком,
+который делает сам SmartHelper, окно дополнительно скрывается; если скрытие не
+подтвердилось, снимок не создаётся. Окно можно закрыть раньше клавишей `Esc` или
+крестиком. Показ окна можно включить или выключить галочкой в программе
+настроек.
+
 Повторные нажатия защищены от дребезга и выполняются последовательно. Если
 предыдущее действие ещё не завершено, программа не запускает второй экземпляр
 записи или обработки снимка.
@@ -124,6 +142,15 @@ python -m app.settings_app
 
 Пользовательские настройки хранятся локально в
 `%APPDATA%\SmartHelper\settings.json` и загружаются при следующем запуске.
+
+Журнал работы программы хранится в:
+
+```text
+%LOCALAPPDATA%\SmartHelper\logs\smarthelper.log
+```
+
+При достижении 2 МБ журнал автоматически архивируется. Сохраняются пять
+предыдущих файлов.
 
 Длинная запись автоматически делится на части перед распознаванием и затем
 собирается в один текст. Сервер принимает WAV-файлы размером до 20 МБ — это
@@ -140,12 +167,11 @@ python -m app.settings_app
 
 ## Сборка программы Windows
 
-Установите средства разработки и выполните:
+Установите `uv` и выполните:
 
 ```powershell
-pip install -r requirements-client.txt
-pip install -r requirements-dev.txt
-pyinstaller --clean build.spec
+uv sync --frozen --extra client --no-dev --group build
+uv run --frozen --extra client --no-dev --group build pyinstaller --clean build.spec
 ```
 
 В папке `dist` появятся два файла:
@@ -177,6 +203,9 @@ pyinstaller --clean build.spec
 - собирает обе программы Windows и сохраняет их в результатах запуска под
   именем `SmartHelper-Windows` на 14 дней.
 
+Локальная разработка, Docker и GitHub используют одинаковые точные версии
+пакетов из `uv.lock`.
+
 Чтобы обновить сервер из опубликованного образа:
 
 ```powershell
@@ -205,8 +234,9 @@ SERVER_URL=https://helper.example.ru
 ## Проверки
 
 ```powershell
-pytest -q
-python -m ruff check app tests scripts
-python -m ruff format --check app tests scripts
-python -m mypy --config-file mypy.ini app tests scripts
+uv sync --frozen --all-extras
+uv run --frozen --all-extras pytest -q
+uv run --frozen --all-extras ruff check app tests scripts
+uv run --frozen --all-extras ruff format --check app tests scripts
+uv run --frozen --all-extras mypy --config-file mypy.ini app tests scripts
 ```

@@ -12,6 +12,10 @@ DEFAULT_SYSTEM = (
 )
 
 
+class YandexServiceError(RuntimeError):
+    pass
+
+
 class YandexGPTClient:
     def __init__(
         self,
@@ -64,7 +68,7 @@ class YandexGPTClient:
         try:
             return self.gpt_request(user_text, system_prompt, temperature)
         except Exception as exc:
-            return f"Ошибка Yandex GPT: {exc}"
+            raise YandexServiceError("Не удалось получить ответ от Яндекса") from exc
 
     def solve_image(
         self,
@@ -83,7 +87,7 @@ class YandexGPTClient:
             print(f"[gpt] answer text: {answer}")
             return answer
         except Exception as exc:
-            return f"Ошибка OCR/Yandex GPT: {exc}"
+            raise YandexServiceError("Не удалось обработать изображение") from exc
 
 
 def build_gpt_client(model: str | None = None) -> YandexGPTClient:

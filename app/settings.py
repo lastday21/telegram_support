@@ -7,8 +7,9 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
+from urllib.parse import urlsplit
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from app.prompts import PROMPTS
 
@@ -17,6 +18,7 @@ ENV_PATH = ROOT.parent / ".env"
 CLIENT_ENV_NAME = "SMARTHELPER_ENV_FILE"
 PREFERENCES_ENV_NAME = "SMARTHELPER_SETTINGS_FILE"
 DEFAULT_YC_MODEL = "qwen3-235b-a22b-fp8/latest"
+DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 DEFAULT_RECORD_HOTKEY = "alt+q"
 DEFAULT_MOUSE_PROMPT = PROMPTS[0]
 DEFAULT_ACTION_HOTKEYS = tuple(f"ctrl+{index}" for index in range(1, 6))
@@ -53,6 +55,7 @@ class ClientSettings:
     mouse_prompt: str = DEFAULT_MOUSE_PROMPT
     action_hotkeys: tuple[str, ...] = DEFAULT_ACTION_HOTKEYS
     action_prompts: tuple[str, ...] = DEFAULT_ACTION_PROMPTS
+    show_answer_overlay: bool = True
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,7 @@ class UserPreferences:
     mouse_prompt: str = DEFAULT_MOUSE_PROMPT
     action_hotkeys: tuple[str, ...] = DEFAULT_ACTION_HOTKEYS
     action_prompts: tuple[str, ...] = DEFAULT_ACTION_PROMPTS
+    show_answer_overlay: bool = True
 
 
 def client_env_path() -> pathlib.Path:
@@ -76,6 +80,14 @@ def client_env_path() -> pathlib.Path:
         return app_data_path
 
     return ENV_PATH
+
+
+def writable_client_env_path() -> pathlib.Path:
+    explicit_path = os.getenv(CLIENT_ENV_NAME)
+    if explicit_path:
+        return pathlib.Path(explicit_path).expanduser().resolve()
+    app_data = pathlib.Path(os.getenv("APPDATA") or pathlib.Path.home())
+    return app_data / "SmartHelper" / ".env"
 
 
 def client_preferences_path() -> pathlib.Path:
@@ -98,6 +110,40 @@ def _require(name: str, env_path: pathlib.Path = ENV_PATH) -> str:
     if not value:
         raise RuntimeError(f"{name} не задан. Заполните файл настроек: {env_path}")
     return value
+
+
+def _read_client_env() -> tuple[dict[str, str], pathlib.Path]:
+    env_path = client_env_path()
+    values: dict[str, str] = {}
+    if env_path.is_file():
+        values.update(
+            {
+                name: value
+                for name, value in dotenv_values(env_path).items()
+                if value is not None
+            }
+        )
+    for name in ("SERVER_URL", "APP_ACCESS_TOKEN", "MIC_DEVICE", "MIX_DEVICE"):
+        value = os.getenv(name)
+        if value is not None:
+            values[name] = value
+    return values, env_path
+
+
+def validate_client_connection(server_url: str, access_token: str) -> tuple[str, str]:
+    normalized_url = server_url.strip().rstrip("/")
+    parsed_url = urlsplit(normalized_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise ValueError("Укажите полный адрес сервера, начиная с http:// или https://")
+    if parsed_url.query or parsed_url.fragment:
+        raise ValueError("Адрес сервера не должен содержать параметры или якорь")
+
+    normalized_token = access_token.strip()
+    if not normalized_token:
+        raise ValueError("Укажите ключ доступа к серверу")
+    if "\n" in normalized_token or "\r" in normalized_token:
+        raise ValueError("Ключ доступа содержит недопустимые символы")
+    return normalized_url, normalized_token
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -143,6 +189,9 @@ def load_user_preferences() -> UserPreferences:
         model = DEFAULT_YC_MODEL
     record_hotkey = _text(data.get("record_hotkey"), DEFAULT_RECORD_HOTKEY).lower()
     mouse_prompt = _text(data.get("mouse_prompt"), DEFAULT_MOUSE_PROMPT)
+    show_answer_overlay = data.get("show_answer_overlay", True)
+    if not isinstance(show_answer_overlay, bool):
+        show_answer_overlay = True
 
     action_hotkeys = list(DEFAULT_ACTION_HOTKEYS)
     action_prompts = list(DEFAULT_ACTION_PROMPTS)
@@ -172,6 +221,7 @@ def load_user_preferences() -> UserPreferences:
         mouse_prompt=mouse_prompt,
         action_hotkeys=validated_hotkeys,
         action_prompts=tuple(action_prompts),
+        show_answer_overlay=show_answer_overlay,
     )
 
 
@@ -190,21 +240,63 @@ def load_settings() -> Settings:
     return settings
 
 
-def load_client_settings() -> ClientSettings:
-    env_path = client_env_path()
-    load_env(env_path)
+def load_client_settings(require_connection: bool = True) -> ClientSettings:
+    values, env_path = _read_client_env()
     preferences = load_user_preferences()
+    server_url = values.get("SERVER_URL", "").strip().rstrip("/")
+    access_token = values.get("APP_ACCESS_TOKEN", "").strip()
+    if require_connection:
+        if not server_url:
+            raise RuntimeError(
+                f"SERVER_URL не задан. Заполните файл настроек: {env_path}"
+            )
+        if not access_token:
+            raise RuntimeError(
+                f"APP_ACCESS_TOKEN не задан. Заполните файл настроек: {env_path}"
+            )
+    else:
+        server_url = server_url or DEFAULT_SERVER_URL
     return ClientSettings(
-        server_url=_require("SERVER_URL", env_path).rstrip("/"),
-        app_access_token=_require("APP_ACCESS_TOKEN", env_path),
-        mic_device=os.getenv("MIC_DEVICE"),
-        mix_device=os.getenv("MIX_DEVICE"),
+        server_url=server_url,
+        app_access_token=access_token,
+        mic_device=values.get("MIC_DEVICE") or None,
+        mix_device=values.get("MIX_DEVICE") or None,
         yc_model=preferences.yc_model,
         record_hotkey=preferences.record_hotkey,
         mouse_prompt=preferences.mouse_prompt,
         action_hotkeys=preferences.action_hotkeys,
         action_prompts=preferences.action_prompts,
+        show_answer_overlay=preferences.show_answer_overlay,
     )
+
+
+def save_client_connection_settings(
+    server_url: str,
+    access_token: str,
+    mic_device: str | None = None,
+    mix_device: str | None = None,
+) -> ClientSettings:
+    normalized_url, normalized_token = validate_client_connection(
+        server_url, access_token
+    )
+    path = writable_client_env_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(path.name + ".tmp")
+    temp_path.write_text(
+        "\n".join(
+            (
+                f"SERVER_URL={normalized_url}",
+                f"APP_ACCESS_TOKEN={normalized_token}",
+                f"MIC_DEVICE={(mic_device or '').strip()}",
+                f"MIX_DEVICE={(mix_device or '').strip()}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+    get_client_settings.cache_clear()
+    return load_client_settings()
 
 
 def save_client_preferences(
@@ -212,6 +304,7 @@ def save_client_preferences(
     record_hotkey: str,
     mouse_prompt: str,
     actions: Sequence[tuple[str, str]],
+    show_answer_overlay: bool = True,
 ) -> UserPreferences:
     if yc_model not in SUPPORTED_YC_MODELS:
         raise ValueError("Выбрана неподдерживаемая модель")
@@ -230,6 +323,7 @@ def save_client_preferences(
         "model": yc_model,
         "record_hotkey": record_hotkey,
         "mouse_prompt": normalized_mouse_prompt,
+        "show_answer_overlay": show_answer_overlay,
         "actions": [
             {"hotkey": hotkey, "prompt": prompt}
             for hotkey, prompt in zip(action_hotkeys, action_prompts, strict=True)

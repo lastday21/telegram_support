@@ -1,4 +1,12 @@
-from app.infra.yandex_gpt import API_URL, DEFAULT_MODEL, DEFAULT_SYSTEM, YandexGPTClient
+import pytest
+
+from app.infra.yandex_gpt import (
+    API_URL,
+    DEFAULT_MODEL,
+    DEFAULT_SYSTEM,
+    YandexGPTClient,
+    YandexServiceError,
+)
 
 
 class _FakeResp:
@@ -86,3 +94,20 @@ def test_full_model_uri_is_used_as_is():
     )
 
     assert client.model_uri == model_uri
+
+
+def test_service_error_does_not_become_answer_or_expose_details():
+    def _failed_http(*_args, **_kwargs):
+        raise RuntimeError("SECRET INTERNAL DETAILS")
+
+    client = YandexGPTClient(
+        api_key="KEY",
+        folder_id="FOLDER",
+        http_post=_failed_http,
+    )
+
+    with pytest.raises(YandexServiceError) as error:
+        client.solve_text("Подробный вопрос")
+
+    assert str(error.value) == "Не удалось получить ответ от Яндекса"
+    assert "SECRET" not in str(error.value)

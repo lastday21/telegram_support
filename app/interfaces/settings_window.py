@@ -5,7 +5,13 @@ from tkinter import messagebox, ttk
 
 import keyboard
 
-from app.settings import MODEL_OPTIONS, get_client_settings, save_client_preferences
+from app.settings import (
+    MODEL_OPTIONS,
+    load_client_settings,
+    save_client_connection_settings,
+    save_client_preferences,
+    validate_client_connection,
+)
 
 BACKGROUND = "#eef2f7"
 CARD = "#ffffff"
@@ -20,7 +26,7 @@ FIELD = "#f8fafc"
 
 class SettingsWindow:
     def run(self) -> None:
-        settings = get_client_settings()
+        settings = load_client_settings(require_connection=False)
         root = tk.Tk()
         root.title("Настройки SmartHelper")
         root.configure(background=BACKGROUND)
@@ -54,6 +60,17 @@ class SettingsWindow:
             selectbackground=[("readonly", FIELD)],
             selectforeground=[("readonly", TEXT)],
         )
+        style.configure(
+            "Modern.TCheckbutton",
+            background=CARD,
+            foreground=TEXT,
+            font=("Segoe UI", 9),
+        )
+        style.map(
+            "Modern.TCheckbutton",
+            background=[("active", CARD)],
+            foreground=[("active", TEXT)],
+        )
 
         header = tk.Frame(root, background=NAVY, height=92)
         header.pack(fill="x")
@@ -75,8 +92,37 @@ class SettingsWindow:
             font=("Segoe UI", 18, "bold"),
         ).pack(anchor="w", pady=(3, 0))
 
-        outer = tk.Frame(root, background=BACKGROUND, padx=20, pady=16)
-        outer.pack(fill="both", expand=True)
+        scroll_host = tk.Frame(root, background=BACKGROUND)
+        scroll_host.pack(fill="both", expand=True)
+        canvas = tk.Canvas(
+            scroll_host,
+            background=BACKGROUND,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        scrollbar = ttk.Scrollbar(
+            scroll_host,
+            orient="vertical",
+            command=canvas.yview,
+        )
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        outer = tk.Frame(canvas, background=BACKGROUND, padx=20, pady=16)
+        outer_window = canvas.create_window((0, 0), window=outer, anchor="nw")
+        outer.bind(
+            "<Configure>",
+            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.bind(
+            "<Configure>",
+            lambda event: canvas.itemconfigure(outer_window, width=event.width),
+        )
+        root.bind_all(
+            "<MouseWheel>",
+            lambda event: canvas.yview_scroll(-int(event.delta / 120), "units"),
+        )
 
         labels = [label for label, _model in MODEL_OPTIONS]
         models_by_label = dict(MODEL_OPTIONS)
@@ -84,7 +130,10 @@ class SettingsWindow:
         model_value = tk.StringVar(
             value=labels_by_model.get(settings.yc_model, labels[0])
         )
+        server_url_value = tk.StringVar(value=settings.server_url)
+        access_token_value = tk.StringVar(value=settings.app_access_token)
         record_value = tk.StringVar(value=settings.record_hotkey)
+        show_answer_overlay_value = tk.BooleanVar(value=settings.show_answer_overlay)
 
         main_card = self._card(outer)
         main_card.pack(fill="x")
@@ -92,8 +141,25 @@ class SettingsWindow:
         self._card_title(main_card, "01", "Основные настройки").grid(
             row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10)
         )
-        self._field_label(main_card, "Модель ответа").grid(
+        self._field_label(main_card, "Адрес сервера").grid(
             row=1, column=0, sticky="w", padx=(0, 14), pady=5
+        )
+        ttk.Entry(
+            main_card,
+            textvariable=server_url_value,
+            style="Modern.TEntry",
+        ).grid(row=1, column=1, sticky="ew", pady=5)
+        self._field_label(main_card, "Ключ доступа").grid(
+            row=2, column=0, sticky="w", padx=(0, 14), pady=5
+        )
+        ttk.Entry(
+            main_card,
+            textvariable=access_token_value,
+            show="•",
+            style="Modern.TEntry",
+        ).grid(row=2, column=1, sticky="ew", pady=5)
+        self._field_label(main_card, "Модель ответа").grid(
+            row=3, column=0, sticky="w", padx=(0, 14), pady=5
         )
         ttk.Combobox(
             main_card,
@@ -101,12 +167,12 @@ class SettingsWindow:
             values=labels,
             state="readonly",
             style="Modern.TCombobox",
-        ).grid(row=1, column=1, sticky="ew", pady=5)
+        ).grid(row=3, column=1, sticky="ew", pady=5)
         self._field_label(main_card, "Запуск микрофона").grid(
-            row=2, column=0, sticky="w", padx=(0, 14), pady=5
+            row=4, column=0, sticky="w", padx=(0, 14), pady=5
         )
         microphone_row = tk.Frame(main_card, background=CARD)
-        microphone_row.grid(row=2, column=1, sticky="ew", pady=5)
+        microphone_row.grid(row=4, column=1, sticky="ew", pady=5)
         microphone_row.columnconfigure(0, weight=1)
         ttk.Entry(
             microphone_row,
@@ -122,6 +188,15 @@ class SettingsWindow:
             padx=9,
             pady=5,
         ).grid(row=0, column=1, padx=(10, 0))
+        self._field_label(main_card, "Окно ответа").grid(
+            row=5, column=0, sticky="w", padx=(0, 14), pady=5
+        )
+        ttk.Checkbutton(
+            main_card,
+            text="Показывать ответ поверх рабочего стола",
+            variable=show_answer_overlay_value,
+            style="Modern.TCheckbutton",
+        ).grid(row=5, column=1, sticky="w", pady=5)
 
         mouse_card = self._card(outer)
         mouse_card.pack(fill="x", pady=(12, 0))
@@ -213,6 +288,9 @@ class SettingsWindow:
             record_hotkey = record_value.get().strip().lower()
             action_hotkeys = [value.get().strip().lower() for value in hotkey_values]
             try:
+                validate_client_connection(
+                    server_url_value.get(), access_token_value.get()
+                )
                 for hotkey in (record_hotkey, *action_hotkeys):
                     keyboard.parse_hotkey(hotkey)
                 actions = [
@@ -224,6 +302,13 @@ class SettingsWindow:
                     record_hotkey=record_hotkey,
                     mouse_prompt=mouse_prompt.get("1.0", "end-1c"),
                     actions=actions,
+                    show_answer_overlay=show_answer_overlay_value.get(),
+                )
+                save_client_connection_settings(
+                    server_url=server_url_value.get(),
+                    access_token=access_token_value.get(),
+                    mic_device=settings.mic_device,
+                    mix_device=settings.mix_device,
                 )
             except Exception as exc:
                 messagebox.showerror("Не удалось сохранить", str(exc), parent=root)
