@@ -35,6 +35,7 @@ class RemoteServiceClient:
         audio_timeout: int = 600,
         ping_timeout: int = 5,
         model: str = DEFAULT_YC_MODEL,
+        tg_chat_id: str | None = None,
     ) -> None:
         self.server_url = server_url.rstrip("/")
         session = requests.Session()
@@ -47,6 +48,7 @@ class RemoteServiceClient:
         self.audio_timeout = audio_timeout
         self.ping_timeout = ping_timeout
         self.model = model
+        self.tg_chat_id = tg_chat_id
         self.headers = {"Authorization": f"Bearer {access_token}"}
 
     def set_model(self, model: str) -> None:
@@ -96,12 +98,18 @@ class RemoteServiceClient:
         return str(response.json()["text"])
 
     def send_message(self, text: str) -> None:
-        self._post("/v1/telegram/message", json={"text": text})
+        payload = {"text": text}
+        if self.tg_chat_id:
+            payload["chat_id"] = self.tg_chat_id
+        self._post("/v1/telegram/message", json=payload)
 
     def send_photo(self, photo: bytes, caption: str | None = None) -> None:
+        data = {"caption": caption or ""}
+        if self.tg_chat_id:
+            data["chat_id"] = self.tg_chat_id
         self._post(
             "/v1/telegram/photo",
-            data={"caption": caption or ""},
+            data=data,
             files={"photo": ("screenshot.png", photo, "image/png")},
         )
 
@@ -112,4 +120,5 @@ def build_remote_client(settings: ClientSettings | None = None) -> RemoteService
         selected_settings.server_url,
         selected_settings.app_access_token,
         model=selected_settings.yc_model,
+        tg_chat_id=selected_settings.tg_chat_id,
     )

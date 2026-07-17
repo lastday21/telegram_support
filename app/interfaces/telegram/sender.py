@@ -6,6 +6,24 @@ import requests
 from app.settings import get_settings
 
 DEFAULT_CAPTION = ""
+MAX_MESSAGE_LENGTH = 4096
+
+
+def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
+    remaining = text.strip()
+    chunks: list[str] = []
+    while len(remaining) > limit:
+        newline_at = remaining.rfind("\n", 0, limit + 1)
+        space_at = remaining.rfind(" ", 0, limit + 1)
+        split_at = max(newline_at, space_at)
+        if split_at < limit // 2:
+            split_at = limit
+        chunk = remaining[:split_at].rstrip()
+        chunks.append(chunk or remaining[:limit])
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
 class TelegramSender:
@@ -25,10 +43,13 @@ class TelegramSender:
         return f"https://api.telegram.org/bot{self.bot_token}/{method}"
 
     def send_photo(
-        self, photo: Union[str, Path, bytes, BinaryIO], caption: str | None = None
+        self,
+        photo: Union[str, Path, bytes, BinaryIO],
+        caption: str | None = None,
+        chat_id: str | None = None,
     ) -> None:
         data = {
-            "chat_id": self.chat_id,
+            "chat_id": chat_id or self.chat_id,
             "caption": caption if caption is not None else DEFAULT_CAPTION,
         }
         if isinstance(photo, bytes):
@@ -47,13 +68,14 @@ class TelegramSender:
         )
         resp.raise_for_status()
 
-    def send_message(self, text: str) -> None:
-        resp = self.http_post(
-            self._build_url("sendMessage"),
-            data={"chat_id": self.chat_id, "text": text},
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
+    def send_message(self, text: str, chat_id: str | None = None) -> None:
+        for chunk in split_message(text):
+            resp = self.http_post(
+                self._build_url("sendMessage"),
+                data={"chat_id": chat_id or self.chat_id, "text": chunk},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
 
 
 def build_sender() -> TelegramSender:
@@ -62,10 +84,12 @@ def build_sender() -> TelegramSender:
 
 
 def send_photo(
-    photo: Union[str, Path, bytes, BinaryIO], caption: str | None = None
+    photo: Union[str, Path, bytes, BinaryIO],
+    caption: str | None = None,
+    chat_id: str | None = None,
 ) -> None:
-    build_sender().send_photo(photo, caption=caption)
+    build_sender().send_photo(photo, caption=caption, chat_id=chat_id)
 
 
-def send_message(text: str) -> None:
-    build_sender().send_message(text)
+def send_message(text: str, chat_id: str | None = None) -> None:
+    build_sender().send_message(text, chat_id=chat_id)

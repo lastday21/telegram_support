@@ -91,6 +91,25 @@ def test_remote_client_proxies_telegram_photo():
     }
 
 
+def test_remote_client_sends_selected_telegram_chat_id():
+    calls = {}
+
+    def fake_post(url, **kwargs):
+        calls["url"] = url
+        calls["json"] = kwargs["json"]
+        return _FakeResponse({"sent": True})
+
+    client = RemoteServiceClient(
+        "http://server", "SECRET", http_post=fake_post, tg_chat_id="-123456"
+    )
+    client.send_message("Ответ")
+
+    assert calls == {
+        "url": "http://server/v1/telegram/message",
+        "json": {"text": "Ответ", "chat_id": "-123456"},
+    }
+
+
 def test_remote_client_checks_protected_ping():
     calls = {}
 

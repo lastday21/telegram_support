@@ -22,6 +22,7 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
         mix_device=None,
         server_url="http://server",
         app_access_token="TOKEN",
+        tg_chat_id="123456",
         yc_model="qwen3-235b-a22b-fp8/latest",
         record_hotkey="alt+q",
         mouse_prompt="Мышь",

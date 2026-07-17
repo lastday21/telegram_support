@@ -47,6 +47,7 @@ def main() -> None:
                 "SERVER_URL="
                 + client_values.get("SERVER_URL", "http://127.0.0.1:8000"),
                 f"APP_ACCESS_TOKEN={token}",
+                "TG_CHAT_ID=" + client_values.get("TG_CHAT_ID", ""),
                 "MIC_DEVICE=" + client_values.get("MIC_DEVICE", ""),
                 "MIX_DEVICE=" + client_values.get("MIX_DEVICE", ""),
                 "",

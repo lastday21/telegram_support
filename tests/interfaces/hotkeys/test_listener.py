@@ -33,6 +33,18 @@ class _FakeOverlay:
         self.events.append("overlay:close")
 
 
+class _ImmediateDelivery:
+    def __init__(self, send):
+        self.send = send
+
+    def submit(self, text):
+        self.send(text)
+        return True
+
+    def close(self):
+        pass
+
+
 def test_toggle_rec_start_and_stop(tmp_path):
     ctx = {
         "messages": [],
@@ -49,6 +61,7 @@ def test_toggle_rec_start_and_stop(tmp_path):
         transcribe_fn=lambda wav: "hello world",
         solve_text_fn=lambda text: ctx["solve_text"].append(text) or "AI ANSWER",
         send_message_fn=lambda text: ctx["messages"].append(text),
+        telegram_delivery=_ImmediateDelivery(ctx["messages"].append),
         status_callback=lambda status, message, notify: statuses.append(
             (status, message, notify)
         ),
@@ -87,6 +100,9 @@ def test_handler_screenshot_flow():
         ),
         send_message_fn=lambda text: events.append("send")
         or ctx["messages"].append(text),
+        telegram_delivery=_ImmediateDelivery(
+            lambda text: events.append("send") or ctx["messages"].append(text)
+        ),
         take_screenshot_fn=lambda: events.append("capture") or b"PNG_BYTES",
         answer_overlay=_FakeOverlay(events),
     )

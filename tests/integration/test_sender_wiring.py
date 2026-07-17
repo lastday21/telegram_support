@@ -26,27 +26,25 @@ def test_send_message_builds_sender_and_delegates(monkeypatch):
     calls = {}
 
     class _FakeSender:
-        def send_message(self, text):
-            calls["text"] = text
+        def send_message(self, text, chat_id=None):
+            calls.update(text=text, chat_id=chat_id)
 
     monkeypatch.setattr(sender, "build_sender", lambda: _FakeSender())
 
     sender.send_message("hello")
 
-    assert calls["text"] == "hello"
+    assert calls == {"text": "hello", "chat_id": None}
 
 
 def test_send_photo_builds_sender_and_delegates(monkeypatch):
     calls = {}
 
     class _FakeSender:
-        def send_photo(self, photo, caption=None):
-            calls["photo"] = photo
-            calls["caption"] = caption
+        def send_photo(self, photo, caption=None, chat_id=None):
+            calls.update(photo=photo, caption=caption, chat_id=chat_id)
 
     monkeypatch.setattr(sender, "build_sender", lambda: _FakeSender())
 
     sender.send_photo(b"PNG_BYTES", caption="prompt")
 
-    assert calls["photo"] == b"PNG_BYTES"
-    assert calls["caption"] == "prompt"
+    assert calls == {"photo": b"PNG_BYTES", "caption": "prompt", "chat_id": None}

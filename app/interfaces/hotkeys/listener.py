@@ -13,6 +13,7 @@ from requests import RequestException
 from app.domain.actions import SerialActionQueue
 from app.domain.audio.recorder import VoiceRecorder
 from app.domain.status import AppStatus
+from app.domain.telegram_delivery import TelegramDeliveryQueue
 from app.infra.audio_devices import pick_default_devices
 from app.infra.remote_client import build_remote_client
 from app.interfaces.hotkeys.middle_click import MiddleClickHook
@@ -52,6 +53,16 @@ class AnswerOverlay(Protocol):
     def hide(self) -> None: ...
 
     def close(self) -> None: ...
+
+
+class TelegramDelivery(Protocol):
+    def submit(self, text: str) -> bool: ...
+
+    def close(self) -> None: ...
+
+
+class StopEvent(Protocol):
+    def wait(self) -> object: ...
 
 
 class _NullAnswerOverlay:
@@ -106,6 +117,7 @@ class HotkeyService:
         action_hotkeys: Sequence[str] = DEFAULT_ACTION_HOTKEYS,
         middle_click_factory: Callable[[Callable[[], object]], Any] = MiddleClickHook,
         answer_overlay: AnswerOverlay | None = None,
+        telegram_delivery: TelegramDelivery | None = None,
     ) -> None:
         self.recorder = recorder
         self.transcribe = transcribe_fn or _missing_server_client
@@ -129,6 +141,10 @@ class HotkeyService:
         self._middle_click_factory = middle_click_factory
         self._middle_click_hook: Any | None = None
         self.answer_overlay: AnswerOverlay = answer_overlay or _NullAnswerOverlay()
+        self.telegram_delivery: TelegramDelivery = (
+            telegram_delivery
+            or TelegramDeliveryQueue(send_message_fn or _missing_server_client)
+        )
         self._closed = False
         self.action_queue = action_queue or SerialActionQueue(
             on_error=self._handle_queue_error
@@ -175,10 +191,10 @@ class HotkeyService:
                 self._report(AppStatus.READY, "Речь не распознана", True)
                 return
 
-            self.send_message(f"Ты продиктовал:\n{text}")
             answer = self.solve_text(self.fixed_prompt + text)
             self._show_answer(answer)
-            self.send_message(f"Ответ:\n{answer}")
+            self._queue_telegram(f"Ты продиктовал:\n{text}")
+            self._queue_telegram(f"Ответ:\n{answer}")
             self._report(AppStatus.READY, "Ответ готов", True)
         except Exception as exc:
             with self._state_lock:
@@ -216,14 +232,10 @@ class HotkeyService:
             image = self.take_screenshot()
             answer = self.solve_image(image, prompt)
             self._show_answer(answer)
-            self.send_message(answer)
+            self._queue_telegram(answer)
             self._report(AppStatus.READY, "Ответ по снимку готов", True)
         except Exception as exc:
             self._report_error("Не удалось обработать снимок", exc)
-            try:
-                self.send_message("Не удалось обработать снимок экрана")
-            except Exception:
-                pass
         finally:
             with self._state_lock:
                 self._processing = False
@@ -309,7 +321,7 @@ class HotkeyService:
         self,
         keyboard_module_override=None,
         thread_factory: Callable[[Callable, tuple], None] | None = None,
-        stop_event: threading.Event | None = None,
+        stop_event: StopEvent | None = None,
     ) -> None:
         keyboard_impl = keyboard_module_override or keyboard_module
         if keyboard_impl is None:
@@ -340,6 +352,7 @@ class HotkeyService:
             return
         self._closed = True
         self.action_queue.close()
+        self.telegram_delivery.close()
         self._unregister_middle_click()
         self.answer_overlay.close()
         keyboard_impl = self._keyboard_impl
@@ -415,6 +428,15 @@ class HotkeyService:
             self.answer_overlay.show(answer)
         except Exception:
             logger.exception("Не удалось показать ответ в закрытом окне")
+
+    def _queue_telegram(self, text: str) -> None:
+        try:
+            accepted = self.telegram_delivery.submit(text)
+        except Exception:
+            logger.exception("Не удалось поставить сообщение Telegram в очередь")
+            return
+        if not accepted:
+            logger.warning("Очередь отправки в Telegram заполнена")
 
 
 def _resolve_devices(

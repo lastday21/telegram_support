@@ -27,8 +27,12 @@ def _build_client(calls: dict) -> TestClient:
             calls.update(image=image, prompt=prompt, model=model) or "Ответ по снимку"
         ),
         transcribe_fn=transcribe,
-        send_message_fn=lambda text: calls.setdefault("message", text),
-        send_photo_fn=lambda photo, caption: calls.update(photo=photo, caption=caption),
+        send_message_fn=lambda text, chat_id: calls.update(
+            message=text, message_chat_id=chat_id
+        ),
+        send_photo_fn=lambda photo, caption, chat_id: calls.update(
+            photo=photo, caption=caption, photo_chat_id=chat_id
+        ),
     )
     return TestClient(application)
 
@@ -114,20 +118,22 @@ def test_telegram_actions_are_proxied():
     message_response = client.post(
         "/v1/telegram/message",
         headers=AUTH,
-        json={"text": "Сообщение"},
+        json={"text": "Сообщение", "chat_id": "123456"},
     )
     photo_response = client.post(
         "/v1/telegram/photo",
         headers=AUTH,
-        data={"caption": "Подпись"},
+        data={"caption": "Подпись", "chat_id": "-123456"},
         files={"photo": ("screen.png", b"PNG", "image/png")},
     )
 
     assert message_response.json() == {"sent": True}
     assert photo_response.json() == {"sent": True}
     assert calls["message"] == "Сообщение"
+    assert calls["message_chat_id"] == "123456"
     assert calls["photo"] == b"PNG"
     assert calls["caption"] == "Подпись"
+    assert calls["photo_chat_id"] == "-123456"
 
 
 def test_yandex_failure_is_returned_as_bad_gateway_without_internal_details():

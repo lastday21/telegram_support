@@ -27,6 +27,7 @@ class TextRequest(BaseModel):
 
 class MessageRequest(BaseModel):
     text: str = Field(min_length=1, max_length=50_000)
+    chat_id: str | None = None
 
 
 def _read_limited(upload: UploadFile, limit: int) -> bytes:
@@ -43,8 +44,8 @@ def create_app(
     solve_text_fn: Callable[[str, str | None], str] = solve_text,
     solve_image_fn: Callable[[bytes, str, str | None], str] = solve_image,
     transcribe_fn: Callable[[Path], str] = transcribe,
-    send_message_fn: Callable[[str], None] = send_message,
-    send_photo_fn: Callable[[bytes, str | None], None] = send_photo,
+    send_message_fn: Callable[[str, str | None], None] = send_message,
+    send_photo_fn: Callable[[bytes, str | None, str | None], None] = send_photo,
 ) -> FastAPI:
     application = FastAPI(title="SmartHelper", docs_url=None, redoc_url=None)
 
@@ -124,15 +125,17 @@ def create_app(
 
     @application.post("/v1/telegram/message", dependencies=[Depends(require_access)])
     def telegram_message(request: MessageRequest) -> dict[str, bool]:
-        send_message_fn(request.text)
+        send_message_fn(request.text, request.chat_id)
         return {"sent": True}
 
     @application.post("/v1/telegram/photo", dependencies=[Depends(require_access)])
     def telegram_photo(
-        photo: UploadFile = File(...), caption: str = Form("")
+        photo: UploadFile = File(...),
+        caption: str = Form(""),
+        chat_id: str = Form(""),
     ) -> dict[str, bool]:
         photo_bytes = _read_limited(photo, MAX_IMAGE_SIZE)
-        send_photo_fn(photo_bytes, caption or None)
+        send_photo_fn(photo_bytes, caption or None, chat_id or None)
         return {"sent": True}
 
     return application

@@ -5,6 +5,12 @@ from tkinter import messagebox, ttk
 
 import keyboard
 
+from app.infra.process_control import (
+    is_main_running,
+    restart_main,
+    start_main,
+    stop_main,
+)
 from app.settings import (
     MODEL_OPTIONS,
     load_client_settings,
@@ -132,6 +138,7 @@ class SettingsWindow:
         )
         server_url_value = tk.StringVar(value=settings.server_url)
         access_token_value = tk.StringVar(value=settings.app_access_token)
+        tg_chat_id_value = tk.StringVar(value=settings.tg_chat_id or "")
         record_value = tk.StringVar(value=settings.record_hotkey)
         show_answer_overlay_value = tk.BooleanVar(value=settings.show_answer_overlay)
 
@@ -158,8 +165,16 @@ class SettingsWindow:
             show="•",
             style="Modern.TEntry",
         ).grid(row=2, column=1, sticky="ew", pady=5)
-        self._field_label(main_card, "Модель ответа").grid(
+        self._field_label(main_card, "Идентификатор чата Telegram").grid(
             row=3, column=0, sticky="w", padx=(0, 14), pady=5
+        )
+        ttk.Entry(
+            main_card,
+            textvariable=tg_chat_id_value,
+            style="Modern.TEntry",
+        ).grid(row=3, column=1, sticky="ew", pady=5)
+        self._field_label(main_card, "Модель ответа").grid(
+            row=4, column=0, sticky="w", padx=(0, 14), pady=5
         )
         ttk.Combobox(
             main_card,
@@ -167,12 +182,12 @@ class SettingsWindow:
             values=labels,
             state="readonly",
             style="Modern.TCombobox",
-        ).grid(row=3, column=1, sticky="ew", pady=5)
+        ).grid(row=4, column=1, sticky="ew", pady=5)
         self._field_label(main_card, "Запуск микрофона").grid(
-            row=4, column=0, sticky="w", padx=(0, 14), pady=5
+            row=5, column=0, sticky="w", padx=(0, 14), pady=5
         )
         microphone_row = tk.Frame(main_card, background=CARD)
-        microphone_row.grid(row=4, column=1, sticky="ew", pady=5)
+        microphone_row.grid(row=5, column=1, sticky="ew", pady=5)
         microphone_row.columnconfigure(0, weight=1)
         ttk.Entry(
             microphone_row,
@@ -189,14 +204,14 @@ class SettingsWindow:
             pady=5,
         ).grid(row=0, column=1, padx=(10, 0))
         self._field_label(main_card, "Окно ответа").grid(
-            row=5, column=0, sticky="w", padx=(0, 14), pady=5
+            row=6, column=0, sticky="w", padx=(0, 14), pady=5
         )
         ttk.Checkbutton(
             main_card,
             text="Показывать ответ поверх рабочего стола",
             variable=show_answer_overlay_value,
             style="Modern.TCheckbutton",
-        ).grid(row=5, column=1, sticky="w", pady=5)
+        ).grid(row=6, column=1, sticky="w", pady=5)
 
         mouse_card = self._card(outer)
         mouse_card.pack(fill="x", pady=(12, 0))
@@ -274,6 +289,84 @@ class SettingsWindow:
             prompt_fields.append(prompt_field)
             actions_card.rowconfigure(index + 1, weight=1)
 
+        control_card = self._card(outer)
+        control_card.pack(fill="x", pady=(12, 0))
+        self._card_title(control_card, "04", "Управление SmartHelper").pack(
+            fill="x", pady=(0, 10)
+        )
+        control_row = tk.Frame(control_card, background=CARD)
+        control_row.pack(fill="x")
+        process_status = tk.StringVar()
+
+        def refresh_process_status() -> None:
+            process_status.set(
+                "СОСТОЯНИЕ: ЗАПУЩЕН" if is_main_running() else "СОСТОЯНИЕ: ОСТАНОВЛЕН"
+            )
+
+        def start_program() -> None:
+            try:
+                started = start_main()
+            except Exception as exc:
+                messagebox.showerror("Не удалось запустить", str(exc), parent=root)
+            else:
+                message = (
+                    "SmartHelper запущен" if started else "SmartHelper уже запущен"
+                )
+                messagebox.showinfo("SmartHelper", message, parent=root)
+            refresh_process_status()
+
+        def stop_program() -> None:
+            try:
+                stopped = stop_main()
+            except Exception as exc:
+                messagebox.showerror("Не удалось остановить", str(exc), parent=root)
+            else:
+                message = (
+                    "SmartHelper остановлен"
+                    if stopped
+                    else "SmartHelper уже остановлен"
+                )
+                messagebox.showinfo("SmartHelper", message, parent=root)
+            refresh_process_status()
+
+        def restart_program() -> None:
+            try:
+                restart_main()
+            except Exception as exc:
+                messagebox.showerror("Не удалось перезапустить", str(exc), parent=root)
+            else:
+                messagebox.showinfo(
+                    "SmartHelper", "SmartHelper перезапущен", parent=root
+                )
+            refresh_process_status()
+
+        tk.Label(
+            control_row,
+            textvariable=process_status,
+            background=CARD,
+            foreground=TEXT,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+        for title, command in (
+            ("Запустить", start_program),
+            ("Остановить", stop_program),
+            ("Перезапустить", restart_program),
+        ):
+            tk.Button(
+                control_row,
+                text=title,
+                command=command,
+                background=FIELD,
+                activebackground="#e2e8f0",
+                foreground=TEXT,
+                relief="flat",
+                borderwidth=1,
+                cursor="hand2",
+                padx=12,
+                pady=6,
+            ).pack(side="right", padx=(8, 0))
+        refresh_process_status()
+
         footer = tk.Frame(outer, background=BACKGROUND)
         footer.pack(fill="x", pady=(14, 0))
         tk.Label(
@@ -307,6 +400,7 @@ class SettingsWindow:
                 save_client_connection_settings(
                     server_url=server_url_value.get(),
                     access_token=access_token_value.get(),
+                    tg_chat_id=tg_chat_id_value.get(),
                     mic_device=settings.mic_device,
                     mix_device=settings.mix_device,
                 )
@@ -315,10 +409,9 @@ class SettingsWindow:
                 return
             messagebox.showinfo(
                 "Настройки сохранены",
-                "Новые настройки будут использованы при следующем запуске SmartHelper.",
+                "Настройки сохранены. Для их применения перезапустите SmartHelper.",
                 parent=root,
             )
-            root.destroy()
 
         save_button = tk.Button(
             footer,

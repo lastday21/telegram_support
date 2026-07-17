@@ -48,6 +48,7 @@ class Settings:
 class ClientSettings:
     server_url: str
     app_access_token: str
+    tg_chat_id: str | None
     mic_device: str | None
     mix_device: str | None
     yc_model: str = DEFAULT_YC_MODEL
@@ -123,7 +124,13 @@ def _read_client_env() -> tuple[dict[str, str], pathlib.Path]:
                 if value is not None
             }
         )
-    for name in ("SERVER_URL", "APP_ACCESS_TOKEN", "MIC_DEVICE", "MIX_DEVICE"):
+    for name in (
+        "SERVER_URL",
+        "APP_ACCESS_TOKEN",
+        "TG_CHAT_ID",
+        "MIC_DEVICE",
+        "MIX_DEVICE",
+    ):
         value = os.getenv(name)
         if value is not None:
             values[name] = value
@@ -144,6 +151,13 @@ def validate_client_connection(server_url: str, access_token: str) -> tuple[str,
     if "\n" in normalized_token or "\r" in normalized_token:
         raise ValueError("Ключ доступа содержит недопустимые символы")
     return normalized_url, normalized_token
+
+
+def validate_telegram_chat_id(chat_id: str | None) -> str:
+    normalized = (chat_id or "").strip()
+    if normalized and not normalized.lstrip("-").isdigit():
+        raise ValueError("Идентификатор чата Telegram должен быть числом")
+    return normalized
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -259,6 +273,7 @@ def load_client_settings(require_connection: bool = True) -> ClientSettings:
     return ClientSettings(
         server_url=server_url,
         app_access_token=access_token,
+        tg_chat_id=values.get("TG_CHAT_ID") or None,
         mic_device=values.get("MIC_DEVICE") or None,
         mix_device=values.get("MIX_DEVICE") or None,
         yc_model=preferences.yc_model,
@@ -273,12 +288,14 @@ def load_client_settings(require_connection: bool = True) -> ClientSettings:
 def save_client_connection_settings(
     server_url: str,
     access_token: str,
+    tg_chat_id: str | None = None,
     mic_device: str | None = None,
     mix_device: str | None = None,
 ) -> ClientSettings:
     normalized_url, normalized_token = validate_client_connection(
         server_url, access_token
     )
+    normalized_chat_id = validate_telegram_chat_id(tg_chat_id)
     path = writable_client_env_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(path.name + ".tmp")
@@ -287,6 +304,7 @@ def save_client_connection_settings(
             (
                 f"SERVER_URL={normalized_url}",
                 f"APP_ACCESS_TOKEN={normalized_token}",
+                f"TG_CHAT_ID={normalized_chat_id}",
                 f"MIC_DEVICE={(mic_device or '').strip()}",
                 f"MIX_DEVICE={(mix_device or '').strip()}",
                 "",

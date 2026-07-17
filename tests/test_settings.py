@@ -86,13 +86,20 @@ def test_connection_settings_can_be_saved_on_first_run(monkeypatch, tmp_path: Pa
     monkeypatch.setenv(
         settings.PREFERENCES_ENV_NAME, str(tmp_path / "preferences.json")
     )
-    for name in ("SERVER_URL", "APP_ACCESS_TOKEN", "MIC_DEVICE", "MIX_DEVICE"):
+    for name in (
+        "SERVER_URL",
+        "APP_ACCESS_TOKEN",
+        "TG_CHAT_ID",
+        "MIC_DEVICE",
+        "MIX_DEVICE",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     initial = settings.load_client_settings(require_connection=False)
     saved = settings.save_client_connection_settings(
         "https://helper.example.ru/",
         "SECRET",
+        tg_chat_id="-123456",
         mic_device="Микрофон",
     )
 
@@ -100,8 +107,14 @@ def test_connection_settings_can_be_saved_on_first_run(monkeypatch, tmp_path: Pa
     assert initial.app_access_token == ""
     assert saved.server_url == "https://helper.example.ru"
     assert saved.app_access_token == "SECRET"
+    assert saved.tg_chat_id == "-123456"
     assert saved.mic_device == "Микрофон"
     assert "APP_ACCESS_TOKEN=SECRET" in env_path.read_text(encoding="utf-8")
+
+
+def test_invalid_telegram_chat_id_is_rejected():
+    with pytest.raises(ValueError, match="должен быть числом"):
+        settings.validate_telegram_chat_id("not-a-number")
 
 
 @pytest.mark.parametrize("server_url", ["", "helper.example.ru", "ftp://host"])
