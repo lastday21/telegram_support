@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from collections.abc import Callable
 
 from app.infra.windows_api import get_last_error, load_library, make_function_type
+
+logger = logging.getLogger(__name__)
 
 
 class MiddleClickHook:
@@ -30,6 +33,7 @@ class MiddleClickHook:
             raise RuntimeError("Не удалось запустить перехват колёсика")
         if self._error is not None:
             raise self._error
+        logger.info("Перехват колёсика запущен")
 
     def stop(self) -> None:
         if not self._thread_id:
@@ -79,7 +83,7 @@ class MiddleClickHook:
                         try:
                             self._callback()
                         except Exception:
-                            pass
+                            logger.exception("Ошибка обработки нажатия колёсика")
                     return 1
                 return int(user32.CallNextHookEx(hook_handle, code, message, data))
 
@@ -100,6 +104,7 @@ class MiddleClickHook:
                 user32.TranslateMessage(ctypes.byref(message))
                 user32.DispatchMessageW(ctypes.byref(message))
         except Exception as exc:
+            logger.exception("Перехват колёсика аварийно завершён")
             self._error = exc
             self._ready.set()
         finally:

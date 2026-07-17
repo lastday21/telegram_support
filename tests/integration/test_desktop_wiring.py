@@ -1,8 +1,13 @@
+from pathlib import Path
+
 from app import desktop
 
 
 def test_desktop_runs_service_without_tray(monkeypatch):
     calls = {}
+    monkeypatch.setattr(
+        desktop, "configure_desktop_logging", lambda: Path("smarthelper.log")
+    )
 
     class _Service:
         def run(self):
@@ -21,6 +26,9 @@ def test_desktop_runs_service_without_tray(monkeypatch):
 
 def test_second_desktop_instance_exits_silently(monkeypatch):
     calls = []
+    monkeypatch.setattr(
+        desktop, "configure_desktop_logging", lambda: Path("smarthelper.log")
+    )
     monkeypatch.setattr(desktop, "acquire_single_instance", lambda: None)
     monkeypatch.setattr(desktop, "build_hotkey_service", lambda: calls.append(True))
 

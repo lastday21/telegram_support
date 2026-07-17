@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from app.infra import remote_client
 from app.infra.remote_client import RemoteServiceClient
 
 
@@ -112,3 +113,40 @@ def test_remote_client_checks_protected_ping():
             "timeout": 5,
         },
     }
+
+
+def test_remote_client_bypasses_system_proxy_for_loopback(monkeypatch):
+    class _FakeSession:
+        trust_env = True
+
+        def post(self, *_args, **_kwargs):
+            raise AssertionError("not called")
+
+        def get(self, *_args, **_kwargs):
+            return _FakeResponse({"status": "ok"})
+
+    session = _FakeSession()
+    monkeypatch.setattr(remote_client.requests, "Session", lambda: session)
+
+    client = RemoteServiceClient("http://127.0.0.1:8000", "SECRET")
+
+    assert session.trust_env is False
+    assert client.ping() is True
+
+
+def test_remote_client_keeps_system_proxy_for_external_server(monkeypatch):
+    class _FakeSession:
+        trust_env = True
+
+        def post(self, *_args, **_kwargs):
+            raise AssertionError("not called")
+
+        def get(self, *_args, **_kwargs):
+            raise AssertionError("not called")
+
+    session = _FakeSession()
+    monkeypatch.setattr(remote_client.requests, "Session", lambda: session)
+
+    RemoteServiceClient("https://helper.example.ru", "SECRET")
+
+    assert session.trust_env is True

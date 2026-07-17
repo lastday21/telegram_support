@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import ipaddress
+import logging
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
 from app.settings import DEFAULT_YC_MODEL, ClientSettings, get_client_settings
+
+logger = logging.getLogger(__name__)
+
+
+def _is_loopback_url(url: str) -> bool:
+    hostname = urlsplit(url).hostname
+    if hostname is None:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 class RemoteServiceClient:
@@ -12,16 +29,20 @@ class RemoteServiceClient:
         self,
         server_url: str,
         access_token: str,
-        http_post=requests.post,
-        http_get=requests.get,
+        http_post=None,
+        http_get=None,
         timeout: int = 120,
         audio_timeout: int = 600,
         ping_timeout: int = 5,
         model: str = DEFAULT_YC_MODEL,
     ) -> None:
         self.server_url = server_url.rstrip("/")
-        self.http_post = http_post
-        self.http_get = http_get
+        session = requests.Session()
+        if _is_loopback_url(self.server_url):
+            session.trust_env = False
+            logger.info("Системный прокси отключён для локального сервера")
+        self.http_post = http_post or session.post
+        self.http_get = http_get or session.get
         self.timeout = timeout
         self.audio_timeout = audio_timeout
         self.ping_timeout = ping_timeout

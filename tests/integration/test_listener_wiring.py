@@ -27,6 +27,7 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
         mouse_prompt="Мышь",
         action_hotkeys=("ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5"),
         action_prompts=("A", "B", "C", "D", "E"),
+        show_answer_overlay=False,
     )
     monkeypatch.setattr(
         listener,
@@ -46,6 +47,7 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
     assert service.prompts == ["A", "B", "C", "D", "E"]
     assert service.solve_text("question") == "answer"
     assert service.ping() is True
+    assert service.answer_overlay.__class__.__name__ == "_NullAnswerOverlay"
 
 
 def test_register_hotkeys_binds_all_prompts():

@@ -1,3 +1,4 @@
+import asyncio
 import types
 
 from app.interfaces.telegram import bot
@@ -67,3 +68,31 @@ def test_service_allows_only_configured_chat():
 
     assert service.is_allowed(allowed) is True
     assert service.is_allowed(denied) is False
+
+
+def test_service_reports_yandex_failure_without_internal_details():
+    def failed_solve(_text: str) -> str:
+        raise RuntimeError("SECRET INTERNAL DETAILS")
+
+    replies: list[str] = []
+    message = types.SimpleNamespace(
+        text="Подробный вопрос",
+        reply_text=lambda text: _append_reply(replies, text),
+    )
+    update = types.SimpleNamespace(
+        effective_chat=types.SimpleNamespace(id=42),
+        message=message,
+    )
+    service = bot.TelegramBotService(
+        solve_text_fn=failed_solve,
+        allowed_chat_id="42",
+    )
+
+    asyncio.run(service.on_msg(update, types.SimpleNamespace()))
+
+    assert replies == [bot.THINKING, bot.ANSWER_ERROR]
+    assert "SECRET" not in " ".join(replies)
+
+
+async def _append_reply(replies: list[str], text: str) -> None:
+    replies.append(text)

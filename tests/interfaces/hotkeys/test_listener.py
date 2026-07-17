@@ -16,6 +16,23 @@ class _FakeRecorder:
         return self.wav_path
 
 
+class _FakeOverlay:
+    def __init__(self, events=None):
+        self.events = events if events is not None else []
+
+    def start(self):
+        self.events.append("overlay:start")
+
+    def show(self, text):
+        self.events.append(("overlay:show", text))
+
+    def hide(self):
+        self.events.append("overlay:hide")
+
+    def close(self):
+        self.events.append("overlay:close")
+
+
 def test_toggle_rec_start_and_stop(tmp_path):
     ctx = {
         "messages": [],
@@ -26,6 +43,7 @@ def test_toggle_rec_start_and_stop(tmp_path):
 
     recorder = _FakeRecorder(wav_path)
     statuses = []
+    overlay_events = []
     service = HotkeyService(
         recorder=recorder,
         transcribe_fn=lambda wav: "hello world",
@@ -34,6 +52,7 @@ def test_toggle_rec_start_and_stop(tmp_path):
         status_callback=lambda status, message, notify: statuses.append(
             (status, message, notify)
         ),
+        answer_overlay=_FakeOverlay(overlay_events),
     )
 
     service.toggle_recording()
@@ -47,6 +66,7 @@ def test_toggle_rec_start_and_stop(tmp_path):
     assert len(ctx["messages"]) == 2
     assert ctx["messages"][0].startswith("Ты продиктовал:")
     assert ctx["messages"][1].startswith("Ответ:")
+    assert overlay_events == [("overlay:show", "AI ANSWER")]
     assert ctx["solve_text"] == [FIXED_PROMPT + "hello world"]
     assert not wav_path.exists()
     assert statuses[-1] == (AppStatus.READY, "Ответ готов", True)
@@ -57,19 +77,49 @@ def test_handler_screenshot_flow():
         "messages": [],
         "solve_image": [],
     }
+    events = []
     service = HotkeyService(
         recorder=_FakeRecorder(None),
         solve_image_fn=lambda img, prompt: (
-            ctx["solve_image"].append((img, prompt)) or "IMG ANSWER"
+            events.append("solve")
+            or ctx["solve_image"].append((img, prompt))
+            or "IMG ANSWER"
         ),
-        send_message_fn=lambda text: ctx["messages"].append(text),
-        take_screenshot_fn=lambda: b"PNG_BYTES",
+        send_message_fn=lambda text: events.append("send")
+        or ctx["messages"].append(text),
+        take_screenshot_fn=lambda: events.append("capture") or b"PNG_BYTES",
+        answer_overlay=_FakeOverlay(events),
     )
 
     service.handle_prompt("PROMPT_X")
 
     assert ctx["solve_image"] == [(b"PNG_BYTES", "PROMPT_X")]
     assert ctx["messages"] == ["IMG ANSWER"]
+    assert events == [
+        "overlay:hide",
+        "capture",
+        "solve",
+        ("overlay:show", "IMG ANSWER"),
+        "send",
+    ]
+
+
+def test_screenshot_is_not_taken_when_overlay_cannot_hide():
+    class _BrokenOverlay(_FakeOverlay):
+        def hide(self):
+            raise RuntimeError("not hidden")
+
+    captured = []
+    service = HotkeyService(
+        recorder=_FakeRecorder(None),
+        send_message_fn=lambda _text: None,
+        take_screenshot_fn=lambda: captured.append(True) or b"PNG_BYTES",
+        answer_overlay=_BrokenOverlay(),
+    )
+
+    service.handle_prompt("PROMPT_X")
+
+    assert captured == []
 
 
 def test_prompt_is_rejected_while_recording():

@@ -73,7 +73,16 @@ def create_app(
 
     @application.post("/v1/text", dependencies=[Depends(require_access)])
     def text_answer(request: TextRequest) -> dict[str, str]:
-        return {"answer": solve_text_fn(request.text, validate_model(request.model))}
+        try:
+            answer = solve_text_fn(request.text, validate_model(request.model))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Не удалось получить текстовый ответ")
+            raise HTTPException(
+                status_code=502, detail="Не удалось получить ответ от Яндекса"
+            ) from exc
+        return {"answer": answer}
 
     @application.post("/v1/image", dependencies=[Depends(require_access)])
     def image_answer(
@@ -82,7 +91,16 @@ def create_app(
         model: str | None = Form(None),
     ) -> dict[str, str]:
         image_bytes = _read_limited(image, MAX_IMAGE_SIZE)
-        return {"answer": solve_image_fn(image_bytes, prompt, validate_model(model))}
+        try:
+            answer = solve_image_fn(image_bytes, prompt, validate_model(model))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Не удалось обработать изображение")
+            raise HTTPException(
+                status_code=502, detail="Не удалось обработать изображение"
+            ) from exc
+        return {"answer": answer}
 
     @application.post("/v1/transcribe", dependencies=[Depends(require_access)])
     def audio_text(audio: UploadFile = File(...)) -> dict[str, str]:

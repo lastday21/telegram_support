@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -15,6 +16,7 @@ from app.domain.status import AppStatus
 from app.infra.audio_devices import pick_default_devices
 from app.infra.remote_client import build_remote_client
 from app.interfaces.hotkeys.middle_click import MiddleClickHook
+from app.interfaces.private_overlay import PrivateAnswerOverlay
 from app.settings import (
     DEFAULT_ACTION_HOTKEYS,
     DEFAULT_ACTION_PROMPTS,
@@ -31,6 +33,8 @@ FIXED_PROMPT = (
 )
 HOTKEY_DEBOUNCE_SECONDS = 0.45
 
+logger = logging.getLogger(__name__)
+
 StatusCallback = Callable[[AppStatus, str, bool], None]
 
 
@@ -38,6 +42,30 @@ class ActionQueue(Protocol):
     def submit(self, target: Callable, args: tuple = ()) -> bool: ...
 
     def close(self) -> None: ...
+
+
+class AnswerOverlay(Protocol):
+    def start(self) -> None: ...
+
+    def show(self, text: str) -> None: ...
+
+    def hide(self) -> None: ...
+
+    def close(self) -> None: ...
+
+
+class _NullAnswerOverlay:
+    def start(self) -> None:
+        pass
+
+    def show(self, text: str) -> None:
+        pass
+
+    def hide(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
 
 
 try:
@@ -77,6 +105,7 @@ class HotkeyService:
         mouse_prompt: str = DEFAULT_MOUSE_PROMPT,
         action_hotkeys: Sequence[str] = DEFAULT_ACTION_HOTKEYS,
         middle_click_factory: Callable[[Callable[[], object]], Any] = MiddleClickHook,
+        answer_overlay: AnswerOverlay | None = None,
     ) -> None:
         self.recorder = recorder
         self.transcribe = transcribe_fn or _missing_server_client
@@ -99,6 +128,7 @@ class HotkeyService:
         self._keyboard_impl = None
         self._middle_click_factory = middle_click_factory
         self._middle_click_hook: Any | None = None
+        self.answer_overlay: AnswerOverlay = answer_overlay or _NullAnswerOverlay()
         self._closed = False
         self.action_queue = action_queue or SerialActionQueue(
             on_error=self._handle_queue_error
@@ -147,6 +177,7 @@ class HotkeyService:
 
             self.send_message(f"Ты продиктовал:\n{text}")
             answer = self.solve_text(self.fixed_prompt + text)
+            self._show_answer(answer)
             self.send_message(f"Ответ:\n{answer}")
             self._report(AppStatus.READY, "Ответ готов", True)
         except Exception as exc:
@@ -181,8 +212,10 @@ class HotkeyService:
 
         self._report(AppStatus.WORKING, "Обрабатываю снимок экрана")
         try:
+            self.answer_overlay.hide()
             image = self.take_screenshot()
             answer = self.solve_image(image, prompt)
+            self._show_answer(answer)
             self.send_message(answer)
             self._report(AppStatus.READY, "Ответ по снимку готов", True)
         except Exception as exc:
@@ -282,6 +315,12 @@ class HotkeyService:
         if keyboard_impl is None:
             raise RuntimeError("Пакет keyboard не установлен")
 
+        try:
+            self.answer_overlay.start()
+        except Exception:
+            logger.exception("Закрытое окно ответа недоступно")
+            self.answer_overlay = _NullAnswerOverlay()
+
         print(f"Готово: {self.record_hotkey} — запись, колёсико — ответ по экрану")
         self.register_hotkeys(
             keyboard_module_override=keyboard_impl,
@@ -302,6 +341,7 @@ class HotkeyService:
         self._closed = True
         self.action_queue.close()
         self._unregister_middle_click()
+        self.answer_overlay.close()
         keyboard_impl = self._keyboard_impl
         if keyboard_impl is not None and hasattr(keyboard_impl, "unhook_all_hotkeys"):
             keyboard_impl.unhook_all_hotkeys()
@@ -370,6 +410,12 @@ class HotkeyService:
     def _handle_queue_error(self, exc: Exception) -> None:
         self._report_error("Не удалось выполнить действие", exc)
 
+    def _show_answer(self, answer: str) -> None:
+        try:
+            self.answer_overlay.show(answer)
+        except Exception:
+            logger.exception("Не удалось показать ответ в закрытом окне")
+
 
 def _resolve_devices(
     settings: ClientSettings | None = None,
@@ -401,6 +447,9 @@ def build_hotkey_service(
         mouse_prompt=settings.mouse_prompt,
         action_hotkeys=settings.action_hotkeys,
         prompts=settings.action_prompts,
+        answer_overlay=(
+            PrivateAnswerOverlay() if settings.show_answer_overlay else None
+        ),
     )
 
 

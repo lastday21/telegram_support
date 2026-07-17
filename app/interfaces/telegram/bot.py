@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Sequence
 
 from telegram import Update
@@ -23,6 +24,8 @@ HELP = (
 )
 THINKING = "Думаю..."
 BULB = "Ответ: "
+ANSWER_ERROR = "Не удалось получить ответ от Яндекса. Попробуйте ещё раз позже."
+logger = logging.getLogger(__name__)
 
 
 class TelegramBotService:
@@ -79,9 +82,14 @@ class TelegramBotService:
 
         await msg.reply_text(THINKING)
         loop = asyncio.get_running_loop()
-        answer = await loop.run_in_executor(
-            None, self.solve_text, self.prompts[prompt_index - 1]
-        )
+        try:
+            answer = await loop.run_in_executor(
+                None, self.solve_text, self.prompts[prompt_index - 1]
+            )
+        except Exception:
+            logger.exception("Не удалось получить ответ для команды Telegram")
+            await msg.reply_text(ANSWER_ERROR)
+            return
         await msg.reply_text(f"{BULB}{answer}")
 
     async def on_msg(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -93,7 +101,12 @@ class TelegramBotService:
 
         await msg.reply_text(THINKING)
         loop = asyncio.get_running_loop()
-        answer = await loop.run_in_executor(None, self.solve_text, msg.text)
+        try:
+            answer = await loop.run_in_executor(None, self.solve_text, msg.text)
+        except Exception:
+            logger.exception("Не удалось ответить на сообщение Telegram")
+            await msg.reply_text(ANSWER_ERROR)
+            return
         await msg.reply_text(f"{BULB}{answer}")
 
 

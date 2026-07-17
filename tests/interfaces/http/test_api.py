@@ -128,3 +128,21 @@ def test_telegram_actions_are_proxied():
     assert calls["message"] == "Сообщение"
     assert calls["photo"] == b"PNG"
     assert calls["caption"] == "Подпись"
+
+
+def test_yandex_failure_is_returned_as_bad_gateway_without_internal_details():
+    def failed_text(_text: str, _model: str | None) -> str:
+        raise RuntimeError("SECRET INTERNAL DETAILS")
+
+    application = create_app(access_token="SECRET", solve_text_fn=failed_text)
+    client = TestClient(application)
+
+    response = client.post(
+        "/v1/text",
+        headers=AUTH,
+        json={"text": "Подробный вопрос"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Не удалось получить ответ от Яндекса"}
+    assert "INTERNAL" not in response.text
