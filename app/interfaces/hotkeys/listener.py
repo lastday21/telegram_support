@@ -17,7 +17,6 @@ from app.domain.telegram_delivery import TelegramDeliveryQueue
 from app.infra.audio_devices import pick_default_devices
 from app.infra.remote_client import build_remote_client
 from app.interfaces.hotkeys.middle_click import MiddleClickHook
-from app.interfaces.private_overlay import PrivateAnswerOverlay
 from app.settings import (
     DEFAULT_ACTION_HOTKEYS,
     DEFAULT_ACTION_PROMPTS,
@@ -457,6 +456,11 @@ def build_hotkey_service(
     mic_device, mix_device = _resolve_devices(settings)
     recorder = VoiceRecorder(mic_device=mic_device, mix_device=mix_device)
     remote_client = build_remote_client(settings)
+    answer_overlay = None
+    if settings.show_answer_overlay:
+        from app.interfaces.private_overlay import PrivateAnswerOverlay
+
+        answer_overlay = PrivateAnswerOverlay()
     return HotkeyService(
         recorder=recorder,
         transcribe_fn=remote_client.transcribe,
@@ -469,9 +473,7 @@ def build_hotkey_service(
         mouse_prompt=settings.mouse_prompt,
         action_hotkeys=settings.action_hotkeys,
         prompts=settings.action_prompts,
-        answer_overlay=(
-            PrivateAnswerOverlay() if settings.show_answer_overlay else None
-        ),
+        answer_overlay=answer_overlay,
     )
 
 
