@@ -3,28 +3,28 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: python -m ruff check app tests scripts
+        entry: uv run --frozen --all-extras ruff check app tests scripts
         language: system
         pass_filenames: false
         stages: [pre-commit]
 
       - id: ruff-format
         name: ruff format
-        entry: python -m ruff format --check app tests scripts
+        entry: uv run --frozen --all-extras ruff format --check app tests scripts
         language: system
         pass_filenames: false
         stages: [pre-commit]
 
       - id: mypy
         name: mypy
-        entry: python -m mypy --config-file mypy.ini app tests scripts
+        entry: uv run --frozen --all-extras mypy --config-file mypy.ini app tests scripts
         language: system
         pass_filenames: false
         stages: [pre-commit]
 
       - id: pytest
         name: pytest
-        entry: python -m pytest -q
+        entry: uv run --frozen --all-extras pytest -q
         language: system
         pass_filenames: false
         stages: [pre-commit]

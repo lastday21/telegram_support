@@ -8,6 +8,8 @@
 .ruff_cache
 __pycache__
 venv
+.venv
+.uv-cache
 tests
 Tesseract-OCR
 .env

@@ -23,26 +23,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
+          version: "0.11.28"
           python-version: "3.12"
-          cache: "pip"
+          enable-cache: true
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+        run: uv sync --frozen --all-extras
 
       - name: Ruff
         run: |
-          python -m ruff check app tests scripts
-          python -m ruff format --check app tests scripts
+          uv run --frozen --all-extras ruff check app tests scripts
+          uv run --frozen --all-extras ruff format --check app tests scripts
 
       - name: Mypy
-        run: |
-          python -m mypy --config-file mypy.ini app tests scripts
+        run: uv run --frozen --all-extras mypy --config-file mypy.ini app tests scripts
 
   tests:
     runs-on: ubuntu-latest
@@ -50,21 +47,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
+          version: "0.11.28"
           python-version: "3.12"
-          cache: "pip"
+          enable-cache: true
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+        run: uv sync --frozen --all-extras
 
       - name: Pytest
-        run: |
-          pytest -q
+        run: uv run --frozen --all-extras pytest -q
 
   docker-build:
     needs:
@@ -119,23 +113,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
+          version: "0.11.28"
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: |
-            requirements-client.txt
-            requirements-dev.txt
+          enable-cache: true
 
       - name: Install dependencies
+        run: uv sync --frozen --extra client --no-dev --group build
+
+      - name: Install FFmpeg
+        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-client.txt
-          pip install -r requirements-dev.txt
+          choco install ffmpeg --version=8.1.2 --no-progress --yes
+          $ffmpeg = (Get-Command ffmpeg -ErrorAction Stop).Source
+          "FFMPEG_BINARY=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build Windows application
-        run: pyinstaller --clean build.spec
+        run: uv run --frozen --extra client --no-dev --group build pyinstaller --clean build.spec
 
       - name: Upload Windows application
         uses: actions/upload-artifact@v4

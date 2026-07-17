@@ -1,5 +1,7 @@
 # IDE и кеш
 venv/
+.venv/
+.uv-cache/
 .idea/
 __pycache__/
 .pytest_cache/
