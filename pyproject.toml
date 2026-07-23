@@ -14,7 +14,7 @@ client = [
     "pillow~=11.2.1",
 ]
 server = [
-    "fastapi~=0.116.0",
+    "fastapi~=0.139.2",
     "python-multipart~=0.0.20",
     "python-telegram-bot~=22.1",
     "uvicorn~=0.35.0",

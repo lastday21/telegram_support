@@ -12,6 +12,8 @@ from requests import RequestException
 
 from app.domain.actions import SerialActionQueue
 from app.domain.audio.recorder import VoiceRecorder
+from app.domain.reading_context import ReadingContext
+from app.domain.screenshot_archive import save_screenshot
 from app.domain.status import AppStatus
 from app.domain.telegram_delivery import TelegramDeliveryQueue
 from app.infra.audio_devices import pick_default_devices
@@ -57,6 +59,12 @@ class AnswerOverlay(Protocol):
 class TelegramDelivery(Protocol):
     def submit(self, text: str) -> bool: ...
 
+    def submit_photos(
+        self,
+        photos: Sequence[bytes],
+        caption: str | None = None,
+    ) -> bool: ...
+
     def close(self) -> None: ...
 
 
@@ -89,7 +97,12 @@ except ImportError:  # pragma: no cover - зависит от окружения
 def _default_take_screenshot() -> bytes:
     from app.domain.ocr.capture import take_screenshot
 
-    return take_screenshot()
+    image = take_screenshot()
+    try:
+        save_screenshot(image)
+    except Exception:
+        logger.exception("Не удалось сохранить снимок для последующего разбора")
+    return image
 
 
 def _missing_server_client(*_args, **_kwargs):
@@ -102,8 +115,12 @@ class HotkeyService:
         recorder: VoiceRecorder,
         transcribe_fn: Callable | None = None,
         solve_text_fn: Callable[[str], str] | None = None,
-        solve_image_fn: Callable[[bytes, str], str] | None = None,
+        solve_image_fn: Callable[..., str] | None = None,
+        recognize_image_fn: Callable[[bytes], str] | None = None,
         send_message_fn: Callable[[str], None] | None = None,
+        send_photo_fn: Callable[[bytes, str | None], None] | None = None,
+        send_media_group_fn: Callable[[Sequence[bytes], str | None], None]
+        | None = None,
         take_screenshot_fn: Callable[[], bytes] | None = None,
         ping_fn: Callable[[], bool] | None = None,
         status_callback: StatusCallback | None = None,
@@ -114,14 +131,16 @@ class HotkeyService:
         record_hotkey: str = DEFAULT_RECORD_HOTKEY,
         mouse_prompt: str = DEFAULT_MOUSE_PROMPT,
         action_hotkeys: Sequence[str] = DEFAULT_ACTION_HOTKEYS,
-        middle_click_factory: Callable[[Callable[[], object]], Any] = MiddleClickHook,
+        middle_click_factory: Callable[..., Any] = MiddleClickHook,
         answer_overlay: AnswerOverlay | None = None,
         telegram_delivery: TelegramDelivery | None = None,
+        reading_context: ReadingContext | None = None,
     ) -> None:
         self.recorder = recorder
         self.transcribe = transcribe_fn or _missing_server_client
         self.solve_text = solve_text_fn or _missing_server_client
         self.solve_image = solve_image_fn or _missing_server_client
+        self.recognize_image = recognize_image_fn or _missing_server_client
         self.send_message = send_message_fn or _missing_server_client
         self.take_screenshot = take_screenshot_fn or _default_take_screenshot
         self.ping = ping_fn
@@ -142,8 +161,14 @@ class HotkeyService:
         self.answer_overlay: AnswerOverlay = answer_overlay or _NullAnswerOverlay()
         self.telegram_delivery: TelegramDelivery = (
             telegram_delivery
-            or TelegramDeliveryQueue(send_message_fn or _missing_server_client)
+            or TelegramDeliveryQueue(
+                send_message_fn or _missing_server_client,
+                send_photo_fn,
+                send_media_group_fn,
+            )
         )
+        self.reading_context = reading_context or ReadingContext()
+        self._pending_context_images: list[bytes] = []
         self._closed = False
         self.action_queue = action_queue or SerialActionQueue(
             on_error=self._handle_queue_error
@@ -229,15 +254,93 @@ class HotkeyService:
         try:
             self.answer_overlay.hide()
             image = self.take_screenshot()
-            answer = self.solve_image(image, prompt)
-            self._show_answer(answer)
-            self._queue_telegram(answer)
-            self._report(AppStatus.READY, "Ответ по снимку готов", True)
+            self._process_prompt_image(image, prompt)
         except Exception as exc:
             self._report_error("Не удалось обработать снимок", exc)
         finally:
             with self._state_lock:
                 self._processing = False
+
+    def _handle_captured_prompt(self, image: bytes, prompt: str) -> None:
+        with self._state_lock:
+            if self._processing or self.is_recording:
+                busy = True
+                recording = self.is_recording
+            else:
+                busy = False
+                recording = False
+                self._processing = True
+
+        if busy:
+            status = AppStatus.RECORDING if recording else AppStatus.BUSY
+            message = (
+                "Сначала остановите запись"
+                if recording
+                else "Сначала завершите текущее действие"
+            )
+            self._report(status, message, True)
+            return
+
+        self._report(AppStatus.WORKING, "Обрабатываю сохранённый снимок экрана")
+        try:
+            self._process_prompt_image(image, prompt)
+        except Exception as exc:
+            self._report_error("Не удалось обработать снимок", exc)
+        finally:
+            with self._state_lock:
+                self._processing = False
+
+    def _process_prompt_image(self, image: bytes, prompt: str) -> None:
+        self._queue_screenshots(image)
+        context_text = self.reading_context.text
+        if context_text:
+            answer = self.solve_image(image, prompt, context_text)
+        else:
+            answer = self.solve_image(image, prompt)
+        self._show_answer(answer)
+        self._queue_telegram(answer)
+        self._report(AppStatus.READY, "Ответ по снимку готов", True)
+
+    def capture_reading_context(self) -> None:
+        with self._state_lock:
+            if self._processing or self.is_recording:
+                busy = True
+                recording = self.is_recording
+            else:
+                busy = False
+                recording = False
+                self._processing = True
+
+        if busy:
+            status = AppStatus.RECORDING if recording else AppStatus.BUSY
+            message = (
+                "Сначала остановите запись"
+                if recording
+                else "Сначала завершите текущее действие"
+            )
+            self._report(status, message, True)
+            return
+
+        self._report(AppStatus.WORKING, "Сохраняю часть большого текста")
+        try:
+            self.answer_overlay.hide()
+            image = self.take_screenshot()
+            self._store_reading_context(image)
+        except Exception as exc:
+            self._report_error("Не удалось сохранить часть текста", exc)
+        finally:
+            with self._state_lock:
+                self._processing = False
+
+    def clear_reading_context(self) -> None:
+        update = self.reading_context.clear()
+        with self._state_lock:
+            self._pending_context_images.clear()
+        logger.info("Контекст большого текста очищен")
+        self._report(
+            AppStatus.READY,
+            f"Большой текст очищен: {update.total_chars} знаков",
+        )
 
     def check_server(self) -> bool:
         if self.ping is None:
@@ -261,17 +364,63 @@ class HotkeyService:
         )
 
     def submit_prompt(self, prompt: str, index: int) -> bool:
-        return self._submit_hotkey(
+        return self._submit_captured_prompt(
             f"prompt-{index}",
-            self.handle_prompt,
-            (prompt,),
+            prompt,
         )
 
     def submit_mouse_prompt(self) -> bool:
-        return self._submit_hotkey(
+        return self._submit_captured_prompt(
             "mouse-prompt",
-            self.handle_prompt,
-            (self.mouse_prompt,),
+            self.mouse_prompt,
+        )
+
+    def _submit_captured_prompt(self, key: str, prompt: str) -> bool:
+        if not self._reserve_hotkey(key):
+            return False
+        with self._state_lock:
+            recording = self.is_recording
+        if recording:
+            self._report(AppStatus.RECORDING, "Сначала остановите запись", True)
+            return False
+        try:
+            self.answer_overlay.hide()
+            image = self.take_screenshot()
+        except Exception as exc:
+            self._report_error("Не удалось снять задание", exc)
+            return False
+        accepted = self.action_queue.submit(
+            self._handle_captured_prompt,
+            (image, prompt),
+        )
+        if not accepted:
+            self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
+        return accepted
+
+    def submit_reading_context(self) -> bool:
+        if not self._reserve_hotkey("reading-context"):
+            return False
+        with self._state_lock:
+            recording = self.is_recording
+        if recording:
+            self._report(AppStatus.RECORDING, "Сначала остановите запись", True)
+            return False
+        try:
+            self.answer_overlay.hide()
+            image = self.take_screenshot()
+        except Exception as exc:
+            self._report_error("Не удалось снять часть большого текста", exc)
+            return False
+        accepted = self.action_queue.submit(self._store_reading_context, (image,))
+        if not accepted:
+            self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
+        return accepted
+
+    def submit_clear_reading_context(self) -> bool:
+        return self._submit_hotkey(
+            "clear-reading-context",
+            self.clear_reading_context,
+            (),
         )
 
     def submit_check_server(self) -> bool:
@@ -332,7 +481,11 @@ class HotkeyService:
             logger.exception("Закрытое окно ответа недоступно")
             self.answer_overlay = _NullAnswerOverlay()
 
-        print(f"Готово: {self.record_hotkey} — запись, колёсико — ответ по экрану")
+        print(
+            f"Готово: {self.record_hotkey} — запись, колёсико — ответ по экрану, "
+            "alt+колёсико — добавить большой текст, "
+            "ctrl+колёсико — очистить большой текст"
+        )
         self.register_hotkeys(
             keyboard_module_override=keyboard_impl,
             thread_factory=thread_factory,
@@ -364,7 +517,11 @@ class HotkeyService:
     def _register_middle_click(self) -> None:
         if self._middle_click_hook is not None:
             return
-        hook = self._middle_click_factory(self.submit_mouse_prompt)
+        hook = self._middle_click_factory(
+            self.submit_mouse_prompt,
+            self.submit_reading_context,
+            self.submit_clear_reading_context,
+        )
         hook.start()
         self._middle_click_hook = hook
 
@@ -379,17 +536,42 @@ class HotkeyService:
         target: Callable,
         args: tuple,
     ) -> bool:
+        if not self._reserve_hotkey(key):
+            return False
+
+        accepted = self.action_queue.submit(target, args)
+        if not accepted:
+            self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
+        return accepted
+
+    def _reserve_hotkey(self, key: str) -> bool:
         now = self._clock()
         with self._state_lock:
             previous = self._last_hotkey_at.get(key)
             if previous is not None and now - previous < HOTKEY_DEBOUNCE_SECONDS:
                 return False
             self._last_hotkey_at[key] = now
+        return True
 
-        accepted = self.action_queue.submit(target, args)
-        if not accepted:
-            self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
-        return accepted
+    def _store_reading_context(self, image: bytes) -> None:
+        self._report(AppStatus.WORKING, "Распознаю часть большого текста")
+        with self._state_lock:
+            self._pending_context_images.append(image)
+        text = self.recognize_image(image)
+        update = self.reading_context.add(text)
+        if not text.strip():
+            message = "На снимке не найден текст"
+        elif update.duplicate:
+            message = "Эта часть текста уже сохранена"
+        else:
+            total = f"{update.total_chars:,}".replace(",", " ")
+            message = (
+                f"Часть текста сохранена: {update.fragments}, всего {total} знаков"
+            )
+            if update.truncated:
+                message += "; начало сокращено"
+        logger.info(message)
+        self._report(AppStatus.READY, message)
 
     def _report(
         self,
@@ -437,6 +619,25 @@ class HotkeyService:
         if not accepted:
             logger.warning("Очередь отправки в Telegram заполнена")
 
+    def _queue_screenshots(self, current_image: bytes) -> None:
+        with self._state_lock:
+            context_images = tuple(self._pending_context_images)
+        photos = (*context_images, current_image)
+        caption = (
+            "Большой текст и текущее задание" if context_images else "Снимок задания"
+        )
+        try:
+            accepted = self.telegram_delivery.submit_photos(photos, caption)
+        except Exception:
+            logger.exception("Не удалось поставить снимки Telegram в очередь")
+            return
+        if not accepted:
+            logger.warning("Очередь отправки снимков в Telegram заполнена")
+            return
+        if context_images:
+            with self._state_lock:
+                del self._pending_context_images[: len(context_images)]
+
 
 def _resolve_devices(
     settings: ClientSettings | None = None,
@@ -466,7 +667,10 @@ def build_hotkey_service(
         transcribe_fn=remote_client.transcribe,
         solve_text_fn=remote_client.solve_text,
         solve_image_fn=remote_client.solve_image,
+        recognize_image_fn=remote_client.recognize_image,
         send_message_fn=remote_client.send_message,
+        send_photo_fn=remote_client.send_photo,
+        send_media_group_fn=remote_client.send_media_group,
         ping_fn=remote_client.ping,
         status_callback=status_callback,
         record_hotkey=settings.record_hotkey,

@@ -1,3 +1,5 @@
+import json
+
 from app.interfaces.telegram.sender import MAX_MESSAGE_LENGTH, TelegramSender
 
 
@@ -42,6 +44,33 @@ def test_send_message():
     assert "/sendMessage" in calls["url"]
     assert calls["data"] == {"chat_id": 777, "text": "hello world"}
     assert calls.get("files") is None
+    assert calls["raised"] and calls["timeout"] == 30
+
+
+def test_send_media_group_with_caption_on_first_photo():
+    calls = {}
+
+    def _fake_http(url, data=None, files=None, timeout=None):
+        calls.update(url=url, data=data, files=files, timeout=timeout)
+        return _FakeResp(calls)
+
+    sender = TelegramSender(bot_token="TOKEN123", chat_id=777, http_post=_fake_http)
+
+    sender.send_media_group([b"PAGE_1", b"PAGE_2"], "Снимки задания")
+
+    assert "/sendMediaGroup" in calls["url"]
+    assert calls["data"]["chat_id"] == 777
+    media = json.loads(calls["data"]["media"])
+    assert media == [
+        {
+            "type": "photo",
+            "media": "attach://photo_1",
+            "caption": "Снимки задания",
+        },
+        {"type": "photo", "media": "attach://photo_2"},
+    ]
+    assert calls["files"]["photo_1"][1] == b"PAGE_1"
+    assert calls["files"]["photo_2"][1] == b"PAGE_2"
     assert calls["raised"] and calls["timeout"] == 30
 
 

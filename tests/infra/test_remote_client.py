@@ -51,6 +51,32 @@ def test_remote_client_can_change_model():
     assert calls["json"]["model"] == "aliceai-llm/latest"
 
 
+def test_remote_client_recognizes_image_and_sends_reading_context():
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/v1/ocr"):
+            return _FakeResponse({"text": "Распознанный текст"})
+        return _FakeResponse({"answer": "Ответ"})
+
+    client = RemoteServiceClient("http://server", "SECRET", http_post=fake_post)
+
+    assert client.recognize_image(b"PAGE") == "Распознанный текст"
+    assert (
+        client.solve_image(b"QUESTION", "Ответь", "Большой исходный текст") == "Ответ"
+    )
+    assert calls[0][0] == "http://server/v1/ocr"
+    assert calls[0][1]["files"]["image"][1] == b"PAGE"
+    assert calls[1][0] == "http://server/v1/image"
+    assert calls[1][1]["data"] == {
+        "prompt": "Ответь",
+        "model": "qwen3-235b-a22b-fp8/latest",
+        "context_text": "Большой исходный текст",
+    }
+    assert calls[1][1]["files"]["image"][1] == b"QUESTION"
+
+
 def test_remote_client_sends_audio_file(tmp_path: Path):
     wav_path = tmp_path / "voice.wav"
     wav_path.write_bytes(b"WAV")
@@ -88,6 +114,30 @@ def test_remote_client_proxies_telegram_photo():
         "url": "http://server/v1/telegram/photo",
         "data": {"caption": "Подпись"},
         "photo": b"PNG",
+    }
+
+
+def test_remote_client_proxies_telegram_media_group():
+    calls = {}
+
+    def fake_post(url, **kwargs):
+        calls["url"] = url
+        calls["data"] = kwargs["data"]
+        calls["photos"] = [file[1][1] for file in kwargs["files"]]
+        return _FakeResponse({"sent": True})
+
+    client = RemoteServiceClient(
+        "http://server",
+        "SECRET",
+        http_post=fake_post,
+        tg_chat_id="-123456",
+    )
+    client.send_media_group([b"PAGE_1", b"PAGE_2"], "Снимки задания")
+
+    assert calls == {
+        "url": "http://server/v1/telegram/media-group",
+        "data": {"caption": "Снимки задания", "chat_id": "-123456"},
+        "photos": [b"PAGE_1", b"PAGE_2"],
     }
 
 

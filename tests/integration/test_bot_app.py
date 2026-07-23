@@ -49,11 +49,29 @@ def test_main_runs_polling_on_created_app(monkeypatch):
     fake_app = types.SimpleNamespace(
         run_polling=lambda: calls.__setitem__("run_polling_called", True)
     )
-    monkeypatch.setattr(bot, "create_app", lambda: fake_app)
+    settings = Settings(
+        yc_api_key="KEY",
+        yc_folder_id="FOLDER",
+        tg_bot_token="TOKEN",
+        tg_chat_id="CHAT",
+        mic_device=None,
+        mix_device=None,
+        app_access_token="ACCESS",
+    )
+    fake_client = types.SimpleNamespace(solve_text=lambda text: text)
+    monkeypatch.setattr(bot, "get_settings", lambda: settings)
+    monkeypatch.setattr(bot, "RemoteServiceClient", lambda **_kwargs: fake_client)
+
+    def create_app(**kwargs):
+        calls["create_app"] = kwargs
+        return fake_app
+
+    monkeypatch.setattr(bot, "create_app", create_app)
 
     bot.main()
 
     assert calls["run_polling_called"] is True
+    assert calls["create_app"]["solve_text_fn"] == fake_client.solve_text
 
 
 def test_service_allows_only_configured_chat():

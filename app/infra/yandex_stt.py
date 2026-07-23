@@ -3,6 +3,10 @@ import wave
 
 import requests
 
+from app.infra.yandex_resilience import (
+    YandexCallPolicy,
+    default_yandex_call_policy,
+)
 from app.settings import get_settings
 
 BASE_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
@@ -22,10 +26,12 @@ class YandexSTTClient:
         folder_id: str,
         http_post=requests.post,
         timeout: int = 90,
+        call_policy: YandexCallPolicy = default_yandex_call_policy,
     ) -> None:
         self.folder_id = folder_id
         self.http_post = http_post
         self.timeout = timeout
+        self.call_policy = call_policy
         self.headers = {"Authorization": f"Api-Key {api_key}"}
 
     def transcribe(self, wav_path: Path) -> str:
@@ -67,14 +73,21 @@ class YandexSTTClient:
 
         _log("POST", url, f"({len(raw)} bytes)")
 
-        response = self.http_post(
-            url, headers=self.headers, data=raw, timeout=self.timeout
-        )
-        _log("HTTP", response.status_code)
-        if response.status_code != 200:
-            _log("STT error:", response.text)
-            raise RuntimeError(f"STT {response.status_code}: {response.text}")
+        def send_request():
+            response = self.http_post(
+                url, headers=self.headers, data=raw, timeout=self.timeout
+            )
+            _log("HTTP", response.status_code)
+            if response.status_code != 200:
+                _log("STT error:", response.text)
+                error = requests.HTTPError(
+                    f"STT {response.status_code}: {response.text}"
+                )
+                error.response = response
+                raise error
+            return response
 
+        response = self.call_policy.execute(send_request)
         return response.json().get("result", "").strip()
 
 

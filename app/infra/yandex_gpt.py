@@ -3,6 +3,11 @@ from typing import Union
 import requests
 
 from app.infra.yandex_ocr import recognize_text
+from app.infra.yandex_resilience import (
+    YandexCallPolicy,
+    YandexCircuitOpenError,
+    default_yandex_call_policy,
+)
 from app.settings import DEFAULT_YC_MODEL, SUPPORTED_YC_MODELS, get_settings
 
 API_URL = "https://ai.api.cloud.yandex.net/v1/chat/completions"
@@ -25,10 +30,12 @@ class YandexGPTClient:
         http_post=requests.post,
         ocr_text_fn=recognize_text,
         timeout: int = 120,
+        call_policy: YandexCallPolicy = default_yandex_call_policy,
     ) -> None:
         self.http_post = http_post
         self.ocr_text = ocr_text_fn
         self.timeout = timeout
+        self.call_policy = call_policy
         self.model_uri = (
             model if model.startswith("gpt://") else f"gpt://{folder_id}/{model}"
         )
@@ -51,10 +58,15 @@ class YandexGPTClient:
                 {"role": "user", "content": user_text},
             ],
         }
-        resp = self.http_post(
-            API_URL, headers=self.headers, json=body, timeout=self.timeout
-        )
-        resp.raise_for_status()
+
+        def send_request():
+            response = self.http_post(
+                API_URL, headers=self.headers, json=body, timeout=self.timeout
+            )
+            response.raise_for_status()
+            return response
+
+        resp = self.call_policy.execute(send_request)
         return resp.json()["choices"][0]["message"]["content"].strip()
 
     def solve_text(
@@ -67,6 +79,8 @@ class YandexGPTClient:
             return "Слишком короткий запрос (нужно больше контекста)."
         try:
             return self.gpt_request(user_text, system_prompt, temperature)
+        except YandexCircuitOpenError:
+            raise
         except Exception as exc:
             raise YandexServiceError("Не удалось получить ответ от Яндекса") from exc
 
@@ -74,18 +88,37 @@ class YandexGPTClient:
         self,
         image: Union[str, bytes],
         prompt: str = "Проанализируй текст на изображении",
+        context_text: str = "",
     ) -> str:
         try:
             text = self.ocr_text(image).strip()
             if not text:
                 print("[gpt] OCR returned empty text")
                 return "Не удалось распознать текст на изображении."
-            combined = f"{prompt}\n\n{text}"
+            normalized_context = context_text.strip()
+            if normalized_context:
+                combined = (
+                    f"{prompt}\n\n"
+                    "Ниже дан ранее собранный большой текст. Используй его как "
+                    "источник для ответа, но отвечай только на задание с текущего "
+                    "снимка. Не пытайся решать старые задания, случайно попавшие "
+                    "в собранный текст.\n\n"
+                    "<СОБРАННЫЙ_ТЕКСТ>\n"
+                    f"{normalized_context}\n"
+                    "</СОБРАННЫЙ_ТЕКСТ>\n\n"
+                    "<ТЕКУЩИЙ_СНИМОК>\n"
+                    f"{text}\n"
+                    "</ТЕКУЩИЙ_СНИМОК>"
+                )
+            else:
+                combined = f"{prompt}\n\n{text}"
             print(f"[gpt] sending OCR text to GPT: {len(text)} chars")
-            answer = self.gpt_request(combined, DEFAULT_SYSTEM)
+            answer = self.gpt_request(combined, DEFAULT_SYSTEM, temperature=0)
             print(f"[gpt] got answer from GPT: {len(answer)} chars")
             print(f"[gpt] answer text: {answer}")
             return answer
+        except YandexCircuitOpenError:
+            raise
         except Exception as exc:
             raise YandexServiceError("Не удалось обработать изображение") from exc
 
@@ -118,6 +151,7 @@ def solve_text(
 def solve_image(
     image: Union[str, bytes],
     prompt: str = "Проанализируй текст на изображении",
+    context_text: str = "",
     model: str | None = None,
 ) -> str:
-    return build_gpt_client(model).solve_image(image, prompt)
+    return build_gpt_client(model).solve_image(image, prompt, context_text)

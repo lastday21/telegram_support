@@ -21,8 +21,10 @@ DEFAULT_YC_MODEL = "qwen3-235b-a22b-fp8/latest"
 DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 DEFAULT_RECORD_HOTKEY = "alt+q"
 DEFAULT_MOUSE_PROMPT = PROMPTS[0]
-DEFAULT_ACTION_HOTKEYS = tuple(f"ctrl+{index}" for index in range(1, 6))
+LEGACY_DEFAULT_ACTION_HOTKEYS = tuple(f"ctrl+{index}" for index in range(1, 6))
+DEFAULT_ACTION_HOTKEYS = tuple(f"alt+{index}" for index in range(1, 6))
 DEFAULT_ACTION_PROMPTS = (PROMPTS[1], PROMPTS[2], PROMPTS[3], PROMPTS[5], PROMPTS[6])
+HOTKEYS_SETTINGS_VERSION = 2
 MODEL_OPTIONS = (
     ("Qwen3 235B — сложные задачи", "qwen3-235b-a22b-fp8/latest"),
     ("Alice AI — быстрый точный ответ", "aliceai-llm/latest"),
@@ -221,6 +223,10 @@ def load_user_preferences() -> UserPreferences:
                 action.get("prompt"), DEFAULT_ACTION_PROMPTS[index]
             )
 
+    hotkeys_version = data.get("hotkeys_version", 1)
+    if hotkeys_version == 1 and tuple(action_hotkeys) == LEGACY_DEFAULT_ACTION_HOTKEYS:
+        action_hotkeys = list(DEFAULT_ACTION_HOTKEYS)
+
     try:
         record_hotkey, validated_hotkeys = validate_hotkeys(
             record_hotkey, action_hotkeys
@@ -338,6 +344,7 @@ def save_client_preferences(
         raise ValueError("Подсказки не могут быть пустыми")
 
     data = {
+        "hotkeys_version": HOTKEYS_SETTINGS_VERSION,
         "model": yc_model,
         "record_hotkey": record_hotkey,
         "mouse_prompt": normalized_mouse_prompt,

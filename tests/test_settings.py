@@ -34,6 +34,7 @@ def test_preferences_are_saved_for_next_launch(monkeypatch, tmp_path: Path):
     )
 
     payload = json.loads(preferences_path.read_text(encoding="utf-8"))
+    assert payload["hotkeys_version"] == settings.HOTKEYS_SETTINGS_VERSION
     assert payload["model"] == "aliceai-llm/latest"
     assert payload["actions"][4]["hotkey"] == "ctrl+5"
     assert payload["show_answer_overlay"] is False
@@ -58,8 +59,30 @@ def test_saved_preferences_are_loaded(monkeypatch, tmp_path: Path):
 
     assert loaded.yc_model == "deepseek-v32/latest"
     assert loaded.record_hotkey == "f8"
-    assert loaded.action_hotkeys == settings.DEFAULT_ACTION_HOTKEYS
+    assert loaded.action_hotkeys == settings.LEGACY_DEFAULT_ACTION_HOTKEYS
     assert loaded.show_answer_overlay is False
+
+
+def test_old_default_ctrl_hotkeys_are_migrated_to_alt(monkeypatch, tmp_path: Path):
+    preferences_path = tmp_path / "settings.json"
+    preferences_path.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {"hotkey": f"ctrl+{index}", "prompt": f"Команда {index}"}
+                    for index in range(1, 6)
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(settings.PREFERENCES_ENV_NAME, str(preferences_path))
+
+    loaded = settings.load_user_preferences()
+
+    assert loaded.action_hotkeys == settings.DEFAULT_ACTION_HOTKEYS
+    assert loaded.action_prompts[0] == "Команда 1"
 
 
 def test_old_preferences_keep_answer_window_enabled(monkeypatch, tmp_path: Path):

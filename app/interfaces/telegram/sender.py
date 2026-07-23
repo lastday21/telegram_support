@@ -1,3 +1,5 @@
+import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import BinaryIO, Union
 
@@ -7,6 +9,8 @@ from app.settings import get_settings
 
 DEFAULT_CAPTION = ""
 MAX_MESSAGE_LENGTH = 4096
+MIN_MEDIA_GROUP_SIZE = 2
+MAX_MEDIA_GROUP_SIZE = 10
 
 
 def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
@@ -68,6 +72,43 @@ class TelegramSender:
         )
         resp.raise_for_status()
 
+    def send_media_group(
+        self,
+        photos: Sequence[bytes],
+        caption: str | None = None,
+        chat_id: str | None = None,
+    ) -> None:
+        if not MIN_MEDIA_GROUP_SIZE <= len(photos) <= MAX_MEDIA_GROUP_SIZE:
+            raise ValueError("Альбом должен содержать от 2 до 10 снимков")
+
+        files = {}
+        media = []
+        for index, photo in enumerate(photos, start=1):
+            field_name = f"photo_{index}"
+            files[field_name] = (
+                f"shot-{index}.png",
+                photo,
+                "image/png",
+            )
+            item = {
+                "type": "photo",
+                "media": f"attach://{field_name}",
+            }
+            if index == 1 and caption:
+                item["caption"] = caption
+            media.append(item)
+
+        resp = self.http_post(
+            self._build_url("sendMediaGroup"),
+            data={
+                "chat_id": chat_id or self.chat_id,
+                "media": json.dumps(media, ensure_ascii=False),
+            },
+            files=files,
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+
     def send_message(self, text: str, chat_id: str | None = None) -> None:
         for chunk in split_message(text):
             resp = self.http_post(
@@ -89,6 +130,14 @@ def send_photo(
     chat_id: str | None = None,
 ) -> None:
     build_sender().send_photo(photo, caption=caption, chat_id=chat_id)
+
+
+def send_media_group(
+    photos: Sequence[bytes],
+    caption: str | None = None,
+    chat_id: str | None = None,
+) -> None:
+    build_sender().send_media_group(photos, caption=caption, chat_id=chat_id)
 
 
 def send_message(text: str, chat_id: str | None = None) -> None:

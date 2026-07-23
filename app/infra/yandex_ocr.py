@@ -5,6 +5,10 @@ from typing import Union
 
 import requests
 
+from app.infra.yandex_resilience import (
+    YandexCallPolicy,
+    default_yandex_call_policy,
+)
 from app.settings import get_settings
 
 OCR_API_URL = "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText"
@@ -24,9 +28,11 @@ class YandexOCRClient:
         api_key: str,
         http_post=requests.post,
         timeout: int = 60,
+        call_policy: YandexCallPolicy = default_yandex_call_policy,
     ) -> None:
         self.http_post = http_post
         self.timeout = timeout
+        self.call_policy = call_policy
         self.headers = {
             "Authorization": f"Api-Key {api_key}",
             "Content-Type": "application/json",
@@ -50,25 +56,27 @@ class YandexOCRClient:
             "model": model,
             "content": base64.b64encode(payload).decode("ascii"),
         }
-        resp = self.http_post(
-            OCR_API_URL,
-            headers=self.headers,
-            json=body,
-            timeout=self.timeout,
-        )
-        status_code = getattr(resp, "status_code", "<unknown>")
-        print(f"[ocr] http status: {status_code}")
+
+        def send_request():
+            response = self.http_post(
+                OCR_API_URL,
+                headers=self.headers,
+                json=body,
+                timeout=self.timeout,
+            )
+            status_code = getattr(response, "status_code", "<unknown>")
+            print(f"[ocr] http status: {status_code}")
+            if getattr(response, "status_code", 200) >= 400:
+                response_text = getattr(response, "text", "")
+                print(f"[ocr] error body: {response_text[:500] or '<empty>'}")
+            response.raise_for_status()
+            return response
+
+        resp = self.call_policy.execute(send_request)
         try:
             payload_json = resp.json()
         except Exception:
             payload_json = None
-
-        if getattr(resp, "status_code", 200) >= 400:
-            response_text = getattr(resp, "text", "")
-            print(f"[ocr] error body: {response_text[:500] or '<empty>'}")
-            resp.raise_for_status()
-
-        resp.raise_for_status()
 
         if payload_json is None:
             raise RuntimeError("OCR response is not valid JSON")

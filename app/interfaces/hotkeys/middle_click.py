@@ -11,8 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 class MiddleClickHook:
-    def __init__(self, callback: Callable[[], object]) -> None:
+    def __init__(
+        self,
+        callback: Callable[[], object],
+        context_callback: Callable[[], object] | None = None,
+        clear_context_callback: Callable[[], object] | None = None,
+    ) -> None:
         self._callback = callback
+        self._context_callback = context_callback
+        self._clear_context_callback = clear_context_callback
         self._thread: threading.Thread | None = None
         self._thread_id = 0
         self._ready = threading.Event()
@@ -46,6 +53,14 @@ class MiddleClickHook:
         self._thread_id = 0
         self._thread = None
 
+    def _dispatch_click(self, control_pressed: bool, alt_pressed: bool) -> None:
+        if control_pressed and self._clear_context_callback:
+            self._clear_context_callback()
+        elif alt_pressed and self._context_callback:
+            self._context_callback()
+        else:
+            self._callback()
+
     def _run(self) -> None:
         import ctypes
         from ctypes import wintypes
@@ -76,12 +91,18 @@ class MiddleClickHook:
                 wintypes.LPARAM,
             )
             user32.CallNextHookEx.restype = result_type
+            user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
+            user32.GetAsyncKeyState.restype = ctypes.c_short
 
             def handle_mouse(code: int, message: int, data: int) -> int:
                 if code >= 0 and message in {0x0207, 0x0208}:
                     if message == 0x0208:
                         try:
-                            self._callback()
+                            control_pressed = bool(
+                                user32.GetAsyncKeyState(0x11) & 0x8000
+                            )
+                            alt_pressed = bool(user32.GetAsyncKeyState(0x12) & 0x8000)
+                            self._dispatch_click(control_pressed, alt_pressed)
                         except Exception:
                             logger.exception("Ошибка обработки нажатия колёсика")
                     return 1

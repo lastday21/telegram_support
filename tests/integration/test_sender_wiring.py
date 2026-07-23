@@ -48,3 +48,21 @@ def test_send_photo_builds_sender_and_delegates(monkeypatch):
     sender.send_photo(b"PNG_BYTES", caption="prompt")
 
     assert calls == {"photo": b"PNG_BYTES", "caption": "prompt", "chat_id": None}
+
+
+def test_send_media_group_builds_sender_and_delegates(monkeypatch):
+    calls = {}
+
+    class _FakeSender:
+        def send_media_group(self, photos, caption=None, chat_id=None):
+            calls.update(photos=photos, caption=caption, chat_id=chat_id)
+
+    monkeypatch.setattr(sender, "build_sender", lambda: _FakeSender())
+
+    sender.send_media_group([b"PAGE_1", b"PAGE_2"], caption="Снимки")
+
+    assert calls == {
+        "photos": [b"PAGE_1", b"PAGE_2"],
+        "caption": "Снимки",
+        "chat_id": None,
+    }

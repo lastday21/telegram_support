@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import Sequence
 
 from telegram import Update
@@ -12,6 +13,7 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
+from app.infra.remote_client import RemoteServiceClient
 from app.infra.yandex_gpt import solve_text
 from app.prompts import PROMPTS
 from app.settings import get_settings
@@ -141,7 +143,18 @@ def create_app(
 
 
 def main() -> None:
-    create_app().run_polling()
+    settings = get_settings()
+    server_url = os.getenv("SMARTHELPER_SERVER_URL", "http://server:8000")
+    server = RemoteServiceClient(
+        server_url=server_url,
+        access_token=settings.app_access_token,
+        model=settings.yc_model,
+    )
+    create_app(
+        bot_token=settings.tg_bot_token,
+        solve_text_fn=server.solve_text,
+        allowed_chat_id=settings.tg_chat_id,
+    ).run_polling()
 
 
 if __name__ == "__main__":

@@ -14,7 +14,10 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
         transcribe=lambda _path: "text",
         solve_text=lambda _text: "answer",
         solve_image=lambda _image, _prompt: "answer",
+        recognize_image=lambda _image: "recognized",
         send_message=lambda _text: None,
+        send_photo=lambda _photo, _caption=None: None,
+        send_media_group=lambda _photos, _caption=None: None,
         ping=lambda: True,
     )
     settings = types.SimpleNamespace(
@@ -60,8 +63,10 @@ def test_register_hotkeys_binds_all_prompts():
             registered.append((combo, handler))
 
     class _MouseHook:
-        def __init__(self, handler):
+        def __init__(self, handler, context_handler, clear_context_handler):
             self.handler = handler
+            self.context_handler = context_handler
+            self.clear_context_handler = clear_context_handler
 
         def start(self):
             pass

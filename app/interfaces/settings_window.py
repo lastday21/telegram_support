@@ -371,7 +371,7 @@ class SettingsWindow:
         footer.pack(fill="x", pady=(14, 0))
         tk.Label(
             footer,
-            text="Формат клавиш: ctrl+1  •  alt+q  •  ctrl+shift+a",
+            text="Формат клавиш: alt+1  •  alt+q  •  ctrl+shift+a",
             background=BACKGROUND,
             foreground=MUTED,
             font=("Segoe UI", 9),

@@ -17,5 +17,12 @@ services:
     env_file:
       - .env
       - .env.access
+    environment:
+      SMARTHELPER_SERVER_URL: http://server:8000
+    depends_on:
+      server:
+        condition: service_healthy
     command: ["python", "-m", "app.interfaces.telegram.bot"]
+    healthcheck:
+      disable: true
     restart: unless-stopped

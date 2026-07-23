@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -80,10 +81,28 @@ class RemoteServiceClient:
         response = self._post("/v1/text", json={"text": text, "model": self.model})
         return str(response.json()["answer"])
 
-    def solve_image(self, image: bytes, prompt: str) -> str:
+    def recognize_image(self, image: bytes) -> str:
+        response = self._post(
+            "/v1/ocr",
+            files={"image": ("screenshot.png", image, "image/png")},
+        )
+        return str(response.json()["text"])
+
+    def solve_image(
+        self,
+        image: bytes,
+        prompt: str,
+        context_text: str = "",
+    ) -> str:
+        data = {
+            "prompt": prompt,
+            "model": self.model,
+        }
+        if context_text:
+            data["context_text"] = context_text
         response = self._post(
             "/v1/image",
-            data={"prompt": prompt, "model": self.model},
+            data=data,
             files={"image": ("screenshot.png", image, "image/png")},
         )
         return str(response.json()["answer"])
@@ -112,6 +131,23 @@ class RemoteServiceClient:
             data=data,
             files={"photo": ("screenshot.png", photo, "image/png")},
         )
+
+    def send_media_group(
+        self,
+        photos: Sequence[bytes],
+        caption: str | None = None,
+    ) -> None:
+        data = {"caption": caption or ""}
+        if self.tg_chat_id:
+            data["chat_id"] = self.tg_chat_id
+        files = [
+            (
+                "photos",
+                (f"screenshot-{index}.png", photo, "image/png"),
+            )
+            for index, photo in enumerate(photos, start=1)
+        ]
+        self._post("/v1/telegram/media-group", data=data, files=files)
 
 
 def build_remote_client(settings: ClientSettings | None = None) -> RemoteServiceClient:

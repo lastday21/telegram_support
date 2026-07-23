@@ -42,3 +42,29 @@ def test_full_queue_rejects_extra_action():
     assert queue.submit(lambda: None) is False
     release.set()
     queue.close()
+
+
+def test_default_queue_accepts_seven_pending_screens():
+    queue = SerialActionQueue()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    processed = []
+
+    def blocking_action():
+        started.set()
+        release.wait(timeout=2)
+
+    def process(index):
+        processed.append(index)
+        if index == 7:
+            finished.set()
+
+    assert queue.submit(blocking_action) is True
+    assert started.wait(timeout=2) is True
+    assert all(queue.submit(process, (index,)) for index in range(1, 8))
+    release.set()
+    assert finished.wait(timeout=2) is True
+    queue.close()
+
+    assert processed == list(range(1, 8))

@@ -2,9 +2,28 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.interfaces.http.api import MAX_AUDIO_SIZE, create_app
+from app.domain.request_guard import RequestGuard, RequestGuardConfig
+from app.domain.yandex_queue import YandexRequestQueue
+from app.infra.readiness import ExternalReadinessChecker, ReadinessReport
+from app.infra.yandex_resilience import YandexCircuitOpenError
+from app.interfaces.http.api import (
+    MAX_AUDIO_SIZE,
+    MAX_CONTEXT_TEXT_SIZE,
+    create_app,
+)
 
 AUTH = {"Authorization": "Bearer SECRET"}
+
+
+class ReadyChecker(ExternalReadinessChecker):
+    def __init__(self) -> None:
+        pass
+
+    def check(self) -> ReadinessReport:
+        return ReadinessReport(
+            ready=True,
+            checks={"settings": "ok", "yandex": "ok", "telegram": "ok"},
+        )
 
 
 def test_audio_limit_allows_ten_minutes():
@@ -23,8 +42,17 @@ def _build_client(calls: dict) -> TestClient:
         solve_text_fn=lambda text, model: (
             calls.update(text=text, model=model) or "Ответ"
         ),
-        solve_image_fn=lambda image, prompt, model: (
-            calls.update(image=image, prompt=prompt, model=model) or "Ответ по снимку"
+        solve_image_fn=lambda image, prompt, context_text, model: (
+            calls.update(
+                image=image,
+                prompt=prompt,
+                context_text=context_text,
+                model=model,
+            )
+            or "Ответ по снимку"
+        ),
+        recognize_image_fn=lambda image: (
+            calls.update(recognized_image=image) or "Распознанный снимок"
         ),
         transcribe_fn=transcribe,
         send_message_fn=lambda text, chat_id: calls.update(
@@ -33,6 +61,13 @@ def _build_client(calls: dict) -> TestClient:
         send_photo_fn=lambda photo, caption, chat_id: calls.update(
             photo=photo, caption=caption, photo_chat_id=chat_id
         ),
+        send_media_group_fn=lambda photos, caption, chat_id: calls.update(
+            photos=photos,
+            album_caption=caption,
+            album_chat_id=chat_id,
+        ),
+        yandex_queue=YandexRequestQueue(),
+        readiness_checker=ReadyChecker(),
     )
     return TestClient(application)
 
@@ -43,7 +78,40 @@ def test_health_does_not_require_token():
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {
+        "status": "ok",
+        "checks": {"settings": "ok", "yandex": "ok", "telegram": "ok"},
+        "queue": {
+            "active": 0,
+            "waiting": 0,
+            "max_concurrent": 2,
+            "max_waiting": 8,
+        },
+    }
+
+
+def test_live_stays_available_when_external_service_is_down():
+    class UnavailableChecker(ReadyChecker):
+        def check(self) -> ReadinessReport:
+            return ReadinessReport(
+                ready=False,
+                checks={
+                    "settings": "ok",
+                    "yandex": "unavailable",
+                    "telegram": "ok",
+                },
+            )
+
+    client = TestClient(
+        create_app(
+            access_token="SECRET",
+            readiness_checker=UnavailableChecker(),
+        )
+    )
+
+    assert client.get("/live").json() == {"status": "ok"}
+    assert client.get("/ready").status_code == 503
+    assert client.get("/health").status_code == 503
 
 
 def test_protected_ping_requires_token():
@@ -54,7 +122,29 @@ def test_protected_ping_requires_token():
 
     assert denied.status_code == 401
     assert allowed.status_code == 200
-    assert allowed.json() == {"status": "ok"}
+    assert allowed.json()["status"] == "ok"
+
+
+def test_health_returns_service_unavailable_when_dependency_is_down():
+    class UnavailableChecker(ReadyChecker):
+        def check(self) -> ReadinessReport:
+            return ReadinessReport(
+                ready=False,
+                checks={
+                    "settings": "ok",
+                    "yandex": "unavailable",
+                    "telegram": "ok",
+                },
+            )
+
+    application = create_app(
+        access_token="SECRET", readiness_checker=UnavailableChecker()
+    )
+    response = TestClient(application).get("/health")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "unavailable"
+    assert response.json()["checks"]["yandex"] == "unavailable"
 
 
 def test_text_endpoint_requires_valid_token():
@@ -75,15 +165,24 @@ def test_text_endpoint_requires_valid_token():
     assert calls["model"] == "aliceai-llm/latest"
 
 
-def test_image_and_audio_are_passed_to_services():
+def test_image_ocr_and_audio_are_passed_to_services():
     calls = {}
     client = _build_client(calls)
 
     image_response = client.post(
         "/v1/image",
         headers=AUTH,
-        data={"prompt": "Объясни", "model": "deepseek-v32/latest"},
+        data={
+            "prompt": "Объясни",
+            "context_text": "Большой исходный текст",
+            "model": "deepseek-v32/latest",
+        },
         files={"image": ("screen.png", b"PNG", "image/png")},
+    )
+    ocr_response = client.post(
+        "/v1/ocr",
+        headers=AUTH,
+        files={"image": ("screen.png", b"PNG2", "image/png")},
     )
     audio_response = client.post(
         "/v1/transcribe",
@@ -92,11 +191,30 @@ def test_image_and_audio_are_passed_to_services():
     )
 
     assert image_response.json() == {"answer": "Ответ по снимку"}
+    assert ocr_response.json() == {"text": "Распознанный снимок"}
     assert audio_response.json() == {"text": "Распознанный текст"}
     assert calls["image"] == b"PNG"
     assert calls["prompt"] == "Объясни"
+    assert calls["context_text"] == "Большой исходный текст"
     assert calls["model"] == "deepseek-v32/latest"
+    assert calls["recognized_image"] == b"PNG2"
     assert calls["audio"] == b"WAV"
+
+
+def test_image_context_size_is_limited():
+    client = _build_client({})
+
+    response = client.post(
+        "/v1/image",
+        headers=AUTH,
+        data={
+            "prompt": "Объясни",
+            "context_text": "x" * (MAX_CONTEXT_TEXT_SIZE + 1),
+        },
+        files={"image": ("screen.png", b"PNG", "image/png")},
+    )
+
+    assert response.status_code == 422
 
 
 def test_unknown_model_is_rejected():
@@ -126,14 +244,27 @@ def test_telegram_actions_are_proxied():
         data={"caption": "Подпись", "chat_id": "-123456"},
         files={"photo": ("screen.png", b"PNG", "image/png")},
     )
+    album_response = client.post(
+        "/v1/telegram/media-group",
+        headers=AUTH,
+        data={"caption": "Альбом", "chat_id": "-123456"},
+        files=[
+            ("photos", ("page-1.png", b"PAGE_1", "image/png")),
+            ("photos", ("page-2.png", b"PAGE_2", "image/png")),
+        ],
+    )
 
     assert message_response.json() == {"sent": True}
     assert photo_response.json() == {"sent": True}
+    assert album_response.json() == {"sent": True}
     assert calls["message"] == "Сообщение"
     assert calls["message_chat_id"] == "123456"
     assert calls["photo"] == b"PNG"
     assert calls["caption"] == "Подпись"
     assert calls["photo_chat_id"] == "-123456"
+    assert calls["photos"] == [b"PAGE_1", b"PAGE_2"]
+    assert calls["album_caption"] == "Альбом"
+    assert calls["album_chat_id"] == "-123456"
 
 
 def test_yandex_failure_is_returned_as_bad_gateway_without_internal_details():
@@ -152,3 +283,87 @@ def test_yandex_failure_is_returned_as_bad_gateway_without_internal_details():
     assert response.status_code == 502
     assert response.json() == {"detail": "Не удалось получить ответ от Яндекса"}
     assert "INTERNAL" not in response.text
+
+
+def test_open_yandex_circuit_is_returned_as_service_unavailable():
+    def blocked_text(_text: str, _model: str | None) -> str:
+        raise YandexCircuitOpenError("blocked")
+
+    client = TestClient(
+        create_app(
+            access_token="SECRET",
+            solve_text_fn=blocked_text,
+            readiness_checker=ReadyChecker(),
+        )
+    )
+
+    response = client.post(
+        "/v1/text",
+        headers=AUTH,
+        json={"text": "Подробный вопрос"},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30"
+
+
+def test_http_guard_limits_rate_and_request_size():
+    config = RequestGuardConfig(
+        max_concurrent=2,
+        requests_per_window=2,
+        rate_window_seconds=60,
+        max_body_bytes=20,
+        auth_failure_limit=5,
+        auth_failure_window_seconds=60,
+        auth_block_seconds=300,
+    )
+    client = TestClient(
+        create_app(
+            access_token="SECRET",
+            readiness_checker=ReadyChecker(),
+            request_guard=RequestGuard(config),
+        )
+    )
+
+    assert client.get("/v1/ping", headers=AUTH).status_code == 200
+    assert client.get("/v1/ping", headers=AUTH).status_code == 200
+    assert client.get("/v1/ping", headers=AUTH).status_code == 429
+
+    another_client = TestClient(
+        create_app(
+            access_token="SECRET",
+            readiness_checker=ReadyChecker(),
+            request_guard=RequestGuard(config),
+        )
+    )
+    response = another_client.post(
+        "/v1/text",
+        headers=AUTH,
+        content=b"x" * 21,
+    )
+    assert response.status_code == 413
+
+
+def test_http_guard_blocks_repeated_invalid_tokens():
+    config = RequestGuardConfig(
+        max_concurrent=2,
+        requests_per_window=20,
+        rate_window_seconds=60,
+        max_body_bytes=1024,
+        auth_failure_limit=2,
+        auth_failure_window_seconds=60,
+        auth_block_seconds=30,
+    )
+    client = TestClient(
+        create_app(
+            access_token="SECRET",
+            readiness_checker=ReadyChecker(),
+            request_guard=RequestGuard(config),
+        )
+    )
+
+    assert client.get("/v1/ping").status_code == 401
+    blocked = client.get("/v1/ping")
+    assert blocked.status_code == 429
+    assert blocked.headers["Retry-After"] == "30"
+    assert client.get("/v1/ping", headers=AUTH).status_code == 429

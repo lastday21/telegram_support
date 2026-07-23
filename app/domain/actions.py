@@ -16,7 +16,7 @@ class QueuedAction:
 class SerialActionQueue:
     def __init__(
         self,
-        max_pending: int = 4,
+        max_pending: int = 12,
         on_error: Callable[[Exception], None] | None = None,
     ) -> None:
         self._queue: queue.Queue[QueuedAction | None] = queue.Queue(maxsize=max_pending)

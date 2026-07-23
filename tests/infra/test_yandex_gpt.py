@@ -58,6 +58,7 @@ def test_solve_image_success():
 
     def _fake_http(url, headers, json, timeout):
         calls["prompt"] = json["messages"][1]["content"]
+        calls["temperature"] = json["temperature"]
         return _FakeResp({"choices": [{"message": {"content": "SQL explanation"}}]})
 
     client = YandexGPTClient(
@@ -72,7 +73,35 @@ def test_solve_image_success():
     assert result == "SQL explanation"
     assert "Объясни SQL" in calls["prompt"]
     assert "SELECT *" in calls["prompt"]
+    assert calls["temperature"] == 0
     assert calls["ocr_called"] == b"bytes"
+
+
+def test_solve_image_uses_collected_text_as_context():
+    calls = {}
+
+    def _fake_http(url, headers, json, timeout):
+        calls["prompt"] = json["messages"][1]["content"]
+        return _FakeResp({"choices": [{"message": {"content": "Ответ"}}]})
+
+    client = YandexGPTClient(
+        api_key="KEY",
+        folder_id="FOLDER",
+        http_post=_fake_http,
+        ocr_text_fn=lambda _image: "Как звали героя?",
+    )
+
+    result = client.solve_image(
+        b"bytes",
+        prompt="Ответь на вопрос",
+        context_text="Героя звали Алексей.",
+    )
+
+    assert result == "Ответ"
+    assert "<СОБРАННЫЙ_ТЕКСТ>" in calls["prompt"]
+    assert "Героя звали Алексей." in calls["prompt"]
+    assert "<ТЕКУЩИЙ_СНИМОК>" in calls["prompt"]
+    assert "Как звали героя?" in calls["prompt"]
 
 
 def test_solve_image_no_text():
