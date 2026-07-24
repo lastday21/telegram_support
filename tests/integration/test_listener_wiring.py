@@ -14,6 +14,7 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
         transcribe=lambda _path: "text",
         solve_text=lambda _text: "answer",
         solve_image=lambda _image, _prompt: "answer",
+        solve_vision_image=lambda _image, _prompt: "vision answer",
         recognize_image=lambda _image: "recognized",
         send_message=lambda _text: None,
         send_photo=lambda _photo, _caption=None: None,
@@ -28,6 +29,8 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
         tg_chat_id="123456",
         yc_model="qwen3-235b-a22b-fp8/latest",
         record_hotkey="alt+q",
+        vision_hotkey="f1",
+        vision_prompt="Реши изображение",
         mouse_prompt="Мышь",
         action_hotkeys=("ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5"),
         action_prompts=("A", "B", "C", "D", "E"),
@@ -50,6 +53,9 @@ def test_build_hotkey_service_uses_detected_devices(monkeypatch):
     assert service.recorder.mix_device == "MIX"
     assert service.prompts == ["A", "B", "C", "D", "E"]
     assert service.solve_text("question") == "answer"
+    assert service.solve_vision_image(b"image", "prompt") == "vision answer"
+    assert service.vision_hotkey == "f1"
+    assert service.vision_prompt == "Реши изображение"
     assert service.ping() is True
     assert service.answer_overlay.__class__.__name__ == "_NullAnswerOverlay"
 
@@ -85,8 +91,13 @@ def test_register_hotkeys_binds_all_prompts():
         thread_factory=lambda target, args: launched.append((target, args)),
     )
 
-    assert [combo for combo, _ in registered] == ["alt+q", "ctrl+1", "ctrl+2"]
-    registered[1][1]()
+    assert [combo for combo, _ in registered] == [
+        "alt+q",
+        "f1",
+        "ctrl+1",
+        "ctrl+2",
+    ]
+    registered[2][1]()
     assert launched[0][1] == ("A",)
 
 

@@ -1,9 +1,12 @@
+import base64
+
 import pytest
 
 from app.infra.yandex_gpt import (
     API_URL,
     DEFAULT_MODEL,
     DEFAULT_SYSTEM,
+    DEFAULT_VISION_MODEL,
     YandexGPTClient,
     YandexServiceError,
 )
@@ -112,6 +115,38 @@ def test_solve_image_no_text():
     )
 
     assert client.solve_image(b"bytes") == "Не удалось распознать текст на изображении."
+
+
+def test_vision_model_receives_one_image_and_prompt_without_ocr():
+    calls = {}
+
+    def fail_ocr(_image):
+        raise AssertionError("Распознавание текста не должно вызываться")
+
+    def fake_http(url, headers, json, timeout):
+        calls.update(url=url, headers=headers, json=json, timeout=timeout)
+        return _FakeResp({"choices": [{"message": {"content": "x = 2"}}]})
+
+    client = YandexGPTClient(
+        api_key="KEY",
+        folder_id="FOLDER",
+        model=DEFAULT_VISION_MODEL,
+        http_post=fake_http,
+        ocr_text_fn=fail_ocr,
+    )
+
+    answer = client.solve_vision_image(b"PNG_BYTES", "Реши уравнение")
+
+    assert answer == "x = 2"
+    assert calls["json"]["model"] == f"gpt://FOLDER/{DEFAULT_VISION_MODEL}"
+    assert calls["json"]["temperature"] == 0
+    user_content = calls["json"]["messages"][1]["content"]
+    assert user_content[0] == {"type": "text", "text": "Реши уравнение"}
+    assert len(user_content) == 2
+    image_url = user_content[1]["image_url"]["url"]
+    prefix, encoded_image = image_url.split(",", maxsplit=1)
+    assert prefix == "data:image/png;base64"
+    assert base64.b64decode(encoded_image) == b"PNG_BYTES"
 
 
 def test_full_model_uri_is_used_as_is():

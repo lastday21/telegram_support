@@ -23,7 +23,7 @@ from app.domain.request_guard import (
 )
 from app.infra.readiness import ExternalReadinessChecker, build_readiness_checker
 from app.infra.yandex_resilience import YandexCircuitOpenError
-from app.infra.yandex_gpt import solve_image, solve_text
+from app.infra.yandex_gpt import solve_image, solve_text, solve_vision_image
 from app.infra.yandex_ocr import recognize_text
 from app.infra.yandex_stt import transcribe
 from app.interfaces.telegram.sender import send_media_group, send_message, send_photo
@@ -58,6 +58,7 @@ def create_app(
     access_token: str | None = None,
     solve_text_fn: Callable[[str, str | None], str] = solve_text,
     solve_image_fn: Callable[[bytes, str, str, str | None], str] = solve_image,
+    solve_vision_image_fn: Callable[[bytes, str], str] = solve_vision_image,
     recognize_image_fn: Callable[[bytes], str] = recognize_text,
     transcribe_fn: Callable[[Path], str] = transcribe,
     send_message_fn: Callable[[str, str | None], None] = send_message,
@@ -188,6 +189,27 @@ def create_app(
             raise
         except Exception as exc:
             logger.exception("Не удалось обработать изображение")
+            raise HTTPException(
+                status_code=502, detail="Не удалось обработать изображение"
+            ) from exc
+        return {"answer": answer}
+
+    @application.post("/v1/vision", dependencies=[Depends(require_access)])
+    def vision_answer(
+        image: UploadFile = File(...),
+        prompt: str = Form(..., min_length=1, max_length=20_000),
+    ) -> dict[str, str]:
+        image_bytes = _read_limited(image, MAX_IMAGE_SIZE)
+        try:
+            answer = execute_yandex(
+                solve_vision_image_fn,
+                image_bytes,
+                prompt,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Не удалось обработать изображение зрительной моделью")
             raise HTTPException(
                 status_code=502, detail="Не удалось обработать изображение"
             ) from exc

@@ -51,6 +51,10 @@ def _build_client(calls: dict) -> TestClient:
             )
             or "Ответ по снимку"
         ),
+        solve_vision_image_fn=lambda image, prompt: (
+            calls.update(vision_image=image, vision_prompt=prompt)
+            or "Ответ зрительной модели"
+        ),
         recognize_image_fn=lambda image: (
             calls.update(recognized_image=image) or "Распознанный снимок"
         ),
@@ -179,6 +183,12 @@ def test_image_ocr_and_audio_are_passed_to_services():
         },
         files={"image": ("screen.png", b"PNG", "image/png")},
     )
+    vision_response = client.post(
+        "/v1/vision",
+        headers=AUTH,
+        data={"prompt": "Реши по изображению"},
+        files={"image": ("screen.png", b"VISION_PNG", "image/png")},
+    )
     ocr_response = client.post(
         "/v1/ocr",
         headers=AUTH,
@@ -191,12 +201,15 @@ def test_image_ocr_and_audio_are_passed_to_services():
     )
 
     assert image_response.json() == {"answer": "Ответ по снимку"}
+    assert vision_response.json() == {"answer": "Ответ зрительной модели"}
     assert ocr_response.json() == {"text": "Распознанный снимок"}
     assert audio_response.json() == {"text": "Распознанный текст"}
     assert calls["image"] == b"PNG"
     assert calls["prompt"] == "Объясни"
     assert calls["context_text"] == "Большой исходный текст"
     assert calls["model"] == "deepseek-v32/latest"
+    assert calls["vision_image"] == b"VISION_PNG"
+    assert calls["vision_prompt"] == "Реши по изображению"
     assert calls["recognized_image"] == b"PNG2"
     assert calls["audio"] == b"WAV"
 

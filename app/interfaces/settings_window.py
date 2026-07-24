@@ -140,6 +140,7 @@ class SettingsWindow:
         access_token_value = tk.StringVar(value=settings.app_access_token)
         tg_chat_id_value = tk.StringVar(value=settings.tg_chat_id or "")
         record_value = tk.StringVar(value=settings.record_hotkey)
+        vision_hotkey_value = tk.StringVar(value=settings.vision_hotkey)
         show_answer_overlay_value = tk.BooleanVar(value=settings.show_answer_overlay)
 
         main_card = self._card(outer)
@@ -237,9 +238,49 @@ class SettingsWindow:
         mouse_prompt.pack(fill="x")
         mouse_prompt.insert("1.0", settings.mouse_prompt)
 
+        vision_card = self._card(outer)
+        vision_card.pack(fill="x", pady=(12, 0))
+        vision_title = self._card_title(
+            vision_card,
+            "03",
+            "Зрительный режим Qwen 3.6",
+        )
+        vision_title.pack(fill="x", pady=(0, 7))
+        tk.Label(
+            vision_title,
+            text="БЕЗ РАСПОЗНАВАНИЯ ТЕКСТА",
+            background="#ede9fe",
+            foreground="#6d28d9",
+            font=("Segoe UI", 8, "bold"),
+            padx=8,
+            pady=3,
+        ).pack(side="right")
+        tk.Label(
+            vision_card,
+            text=(
+                "По этой клавише Qwen 3.6 получает один текущий снимок "
+                "и подсказку ниже."
+            ),
+            background=CARD,
+            foreground=MUTED,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(0, 7))
+        vision_hotkey_row = tk.Frame(vision_card, background=CARD)
+        vision_hotkey_row.pack(fill="x", pady=(0, 7))
+        self._field_label(vision_hotkey_row, "Клавиша").pack(side="left")
+        ttk.Entry(
+            vision_hotkey_row,
+            textvariable=vision_hotkey_value,
+            width=17,
+            style="Modern.TEntry",
+        ).pack(side="left", padx=(14, 0))
+        vision_prompt = self._prompt_field(vision_card, height=4)
+        vision_prompt.pack(fill="x")
+        vision_prompt.insert("1.0", settings.vision_prompt)
+
         actions_card = self._card(outer)
         actions_card.pack(fill="both", expand=True, pady=(12, 0))
-        self._card_title(actions_card, "03", "Пять дополнительных команд").grid(
+        self._card_title(actions_card, "04", "Пять дополнительных команд").grid(
             row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8)
         )
         actions_card.columnconfigure(2, weight=1)
@@ -291,7 +332,7 @@ class SettingsWindow:
 
         control_card = self._card(outer)
         control_card.pack(fill="x", pady=(12, 0))
-        self._card_title(control_card, "04", "Управление SmartHelper").pack(
+        self._card_title(control_card, "05", "Управление SmartHelper").pack(
             fill="x", pady=(0, 10)
         )
         control_row = tk.Frame(control_card, background=CARD)
@@ -379,12 +420,13 @@ class SettingsWindow:
 
         def save() -> None:
             record_hotkey = record_value.get().strip().lower()
+            vision_hotkey = vision_hotkey_value.get().strip().lower()
             action_hotkeys = [value.get().strip().lower() for value in hotkey_values]
             try:
                 validate_client_connection(
                     server_url_value.get(), access_token_value.get()
                 )
-                for hotkey in (record_hotkey, *action_hotkeys):
+                for hotkey in (record_hotkey, vision_hotkey, *action_hotkeys):
                     keyboard.parse_hotkey(hotkey)
                 actions = [
                     (hotkey, field.get("1.0", "end-1c"))
@@ -393,6 +435,8 @@ class SettingsWindow:
                 save_client_preferences(
                     yc_model=models_by_label[model_value.get()],
                     record_hotkey=record_hotkey,
+                    vision_hotkey=vision_hotkey,
+                    vision_prompt=vision_prompt.get("1.0", "end-1c"),
                     mouse_prompt=mouse_prompt.get("1.0", "end-1c"),
                     actions=actions,
                     show_answer_overlay=show_answer_overlay_value.get(),

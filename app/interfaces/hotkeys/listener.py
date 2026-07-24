@@ -24,6 +24,8 @@ from app.settings import (
     DEFAULT_ACTION_PROMPTS,
     DEFAULT_MOUSE_PROMPT,
     DEFAULT_RECORD_HOTKEY,
+    DEFAULT_VISION_HOTKEY,
+    DEFAULT_VISION_PROMPT,
     ClientSettings,
     get_client_settings,
 )
@@ -116,6 +118,7 @@ class HotkeyService:
         transcribe_fn: Callable | None = None,
         solve_text_fn: Callable[[str], str] | None = None,
         solve_image_fn: Callable[..., str] | None = None,
+        solve_vision_image_fn: Callable[[bytes, str], str] | None = None,
         recognize_image_fn: Callable[[bytes], str] | None = None,
         send_message_fn: Callable[[str], None] | None = None,
         send_photo_fn: Callable[[bytes, str | None], None] | None = None,
@@ -129,6 +132,8 @@ class HotkeyService:
         prompts: Sequence[str] = DEFAULT_ACTION_PROMPTS,
         fixed_prompt: str = FIXED_PROMPT,
         record_hotkey: str = DEFAULT_RECORD_HOTKEY,
+        vision_hotkey: str = DEFAULT_VISION_HOTKEY,
+        vision_prompt: str = DEFAULT_VISION_PROMPT,
         mouse_prompt: str = DEFAULT_MOUSE_PROMPT,
         action_hotkeys: Sequence[str] = DEFAULT_ACTION_HOTKEYS,
         middle_click_factory: Callable[..., Any] = MiddleClickHook,
@@ -140,6 +145,7 @@ class HotkeyService:
         self.transcribe = transcribe_fn or _missing_server_client
         self.solve_text = solve_text_fn or _missing_server_client
         self.solve_image = solve_image_fn or _missing_server_client
+        self.solve_vision_image = solve_vision_image_fn or _missing_server_client
         self.recognize_image = recognize_image_fn or _missing_server_client
         self.send_message = send_message_fn or _missing_server_client
         self.take_screenshot = take_screenshot_fn or _default_take_screenshot
@@ -148,6 +154,8 @@ class HotkeyService:
         self.prompts = list(prompts)
         self.fixed_prompt = fixed_prompt
         self.record_hotkey = record_hotkey
+        self.vision_hotkey = vision_hotkey
+        self.vision_prompt = vision_prompt
         self.mouse_prompt = mouse_prompt
         self.action_hotkeys = list(action_hotkeys)
         self.is_recording = False
@@ -301,6 +309,39 @@ class HotkeyService:
         self._queue_telegram(answer)
         self._report(AppStatus.READY, "Ответ по снимку готов", True)
 
+    def _handle_captured_vision_prompt(self, image: bytes, prompt: str) -> None:
+        with self._state_lock:
+            if self._processing or self.is_recording:
+                busy = True
+                recording = self.is_recording
+            else:
+                busy = False
+                recording = False
+                self._processing = True
+
+        if busy:
+            status = AppStatus.RECORDING if recording else AppStatus.BUSY
+            message = (
+                "Сначала остановите запись"
+                if recording
+                else "Сначала завершите текущее действие"
+            )
+            self._report(status, message, True)
+            return
+
+        self._report(AppStatus.WORKING, "Qwen 3.6 изучает снимок")
+        try:
+            self._queue_vision_screenshot(image)
+            answer = self.solve_vision_image(image, prompt)
+            self._show_answer(answer)
+            self._queue_telegram(answer)
+            self._report(AppStatus.READY, "Ответ Qwen 3.6 готов", True)
+        except Exception as exc:
+            self._report_error("Не удалось обработать снимок через Qwen 3.6", exc)
+        finally:
+            with self._state_lock:
+                self._processing = False
+
     def capture_reading_context(self) -> None:
         with self._state_lock:
             if self._processing or self.is_recording:
@@ -375,6 +416,28 @@ class HotkeyService:
             self.mouse_prompt,
         )
 
+    def submit_vision_prompt(self) -> bool:
+        if not self._reserve_hotkey("vision-prompt"):
+            return False
+        with self._state_lock:
+            recording = self.is_recording
+        if recording:
+            self._report(AppStatus.RECORDING, "Сначала остановите запись", True)
+            return False
+        try:
+            self.answer_overlay.hide()
+            image = self.take_screenshot()
+        except Exception as exc:
+            self._report_error("Не удалось снять задание для Qwen 3.6", exc)
+            return False
+        accepted = self.action_queue.submit(
+            self._handle_captured_vision_prompt,
+            (image, self.vision_prompt),
+        )
+        if not accepted:
+            self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
+        return accepted
+
     def _submit_captured_prompt(self, key: str, prompt: str) -> bool:
         if not self._reserve_hotkey(key):
             return False
@@ -441,6 +504,7 @@ class HotkeyService:
 
         if thread_factory is None:
             keyboard_impl.add_hotkey(self.record_hotkey, self.submit_toggle_recording)
+            keyboard_impl.add_hotkey(self.vision_hotkey, self.submit_vision_prompt)
             for index, (hotkey, prompt) in enumerate(
                 zip(self.action_hotkeys, self.prompts, strict=True), start=1
             ):
@@ -456,6 +520,7 @@ class HotkeyService:
         keyboard_impl.add_hotkey(
             self.record_hotkey, lambda: thread_factory(self.toggle_recording, ())
         )
+        keyboard_impl.add_hotkey(self.vision_hotkey, self.submit_vision_prompt)
         for hotkey, prompt in zip(self.action_hotkeys, self.prompts, strict=True):
             keyboard_impl.add_hotkey(
                 hotkey,
@@ -482,7 +547,9 @@ class HotkeyService:
             self.answer_overlay = _NullAnswerOverlay()
 
         print(
-            f"Готово: {self.record_hotkey} — запись, колёсико — ответ по экрану, "
+            f"Готово: {self.record_hotkey} — запись, "
+            f"{self.vision_hotkey} — Qwen 3.6 по снимку, "
+            "колёсико — ответ по экрану, "
             "alt+колёсико — добавить большой текст, "
             "ctrl+колёсико — очистить большой текст"
         )
@@ -638,6 +705,18 @@ class HotkeyService:
             with self._state_lock:
                 del self._pending_context_images[: len(context_images)]
 
+    def _queue_vision_screenshot(self, current_image: bytes) -> None:
+        try:
+            accepted = self.telegram_delivery.submit_photos(
+                (current_image,),
+                "Снимок для Qwen 3.6",
+            )
+        except Exception:
+            logger.exception("Не удалось поставить снимок Qwen 3.6 в очередь Telegram")
+            return
+        if not accepted:
+            logger.warning("Очередь отправки снимка Qwen 3.6 в Telegram заполнена")
+
 
 def _resolve_devices(
     settings: ClientSettings | None = None,
@@ -667,6 +746,7 @@ def build_hotkey_service(
         transcribe_fn=remote_client.transcribe,
         solve_text_fn=remote_client.solve_text,
         solve_image_fn=remote_client.solve_image,
+        solve_vision_image_fn=remote_client.solve_vision_image,
         recognize_image_fn=remote_client.recognize_image,
         send_message_fn=remote_client.send_message,
         send_photo_fn=remote_client.send_photo,
@@ -674,6 +754,8 @@ def build_hotkey_service(
         ping_fn=remote_client.ping,
         status_callback=status_callback,
         record_hotkey=settings.record_hotkey,
+        vision_hotkey=settings.vision_hotkey,
+        vision_prompt=settings.vision_prompt,
         mouse_prompt=settings.mouse_prompt,
         action_hotkeys=settings.action_hotkeys,
         prompts=settings.action_prompts,

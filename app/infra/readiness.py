@@ -10,7 +10,13 @@ from typing import Any
 
 import requests
 
-from app.settings import SUPPORTED_YC_MODELS, Settings, get_settings, load_env
+from app.settings import (
+    SUPPORTED_YC_MODELS,
+    SUPPORTED_YC_VISION_MODELS,
+    Settings,
+    get_settings,
+    load_env,
+)
 
 logger = logging.getLogger(__name__)
 YANDEX_MODELS_URL = "https://ai.api.cloud.yandex.net/v1/models"
@@ -85,6 +91,8 @@ class ExternalReadinessChecker:
     def _validate_settings(settings: Settings) -> None:
         if settings.yc_model not in SUPPORTED_YC_MODELS:
             raise ValueError("Выбрана неподдерживаемая модель")
+        if settings.yc_vision_model not in SUPPORTED_YC_VISION_MODELS:
+            raise ValueError("Выбрана неподдерживаемая зрительная модель")
         if not settings.tg_chat_id.lstrip("-").isdigit():
             raise ValueError("Идентификатор чата Telegram должен быть числом")
 

@@ -107,6 +107,14 @@ class RemoteServiceClient:
         )
         return str(response.json()["answer"])
 
+    def solve_vision_image(self, image: bytes, prompt: str) -> str:
+        response = self._post(
+            "/v1/vision",
+            data={"prompt": prompt},
+            files={"image": ("screenshot.png", image, "image/png")},
+        )
+        return str(response.json()["answer"])
+
     def transcribe(self, wav_path: Path) -> str:
         with wav_path.open("rb") as wav_file:
             response = self._post(

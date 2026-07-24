@@ -1,3 +1,4 @@
+import base64
 from typing import Union
 
 import requests
@@ -8,12 +9,23 @@ from app.infra.yandex_resilience import (
     YandexCircuitOpenError,
     default_yandex_call_policy,
 )
-from app.settings import DEFAULT_YC_MODEL, SUPPORTED_YC_MODELS, get_settings
+from app.settings import (
+    DEFAULT_YC_MODEL,
+    DEFAULT_YC_VISION_MODEL,
+    SUPPORTED_YC_MODELS,
+    SUPPORTED_YC_VISION_MODELS,
+    get_settings,
+)
 
 API_URL = "https://ai.api.cloud.yandex.net/v1/chat/completions"
 DEFAULT_MODEL = DEFAULT_YC_MODEL
+DEFAULT_VISION_MODEL = DEFAULT_YC_VISION_MODEL
 DEFAULT_SYSTEM = (
     "Ты помощник: отвечай кратко, ясно, структурируй мысли, если нужно пиши по шагам."
+)
+DEFAULT_VISION_SYSTEM = (
+    "Ты внимательно анализируешь изображение задания и решаешь его. "
+    "Не выдумывай невидимые данные. Отвечай по-русски, кратко и точно."
 )
 
 
@@ -122,6 +134,58 @@ class YandexGPTClient:
         except Exception as exc:
             raise YandexServiceError("Не удалось обработать изображение") from exc
 
+    def solve_vision_image(
+        self,
+        image: bytes,
+        prompt: str,
+    ) -> str:
+        if not image:
+            raise ValueError("Получен пустой снимок")
+        normalized_prompt = prompt.strip()
+        if not normalized_prompt:
+            raise ValueError("Подсказка не может быть пустой")
+
+        encoded_image = base64.b64encode(image).decode("ascii")
+        body = {
+            "model": self.model_uri,
+            "stream": False,
+            "temperature": 0,
+            "max_tokens": 1000,
+            "messages": [
+                {"role": "system", "content": DEFAULT_VISION_SYSTEM},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": normalized_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{encoded_image}"
+                            },
+                        },
+                    ],
+                },
+            ],
+        }
+
+        def send_request():
+            response = self.http_post(
+                API_URL,
+                headers=self.headers,
+                json=body,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response
+
+        try:
+            response = self.call_policy.execute(send_request)
+            return response.json()["choices"][0]["message"]["content"].strip()
+        except YandexCircuitOpenError:
+            raise
+        except Exception as exc:
+            raise YandexServiceError("Не удалось обработать изображение") from exc
+
 
 def build_gpt_client(model: str | None = None) -> YandexGPTClient:
     settings = get_settings()
@@ -132,6 +196,17 @@ def build_gpt_client(model: str | None = None) -> YandexGPTClient:
         settings.yc_api_key,
         settings.yc_folder_id,
         model=selected_model,
+    )
+
+
+def build_vision_client() -> YandexGPTClient:
+    settings = get_settings()
+    if settings.yc_vision_model not in SUPPORTED_YC_VISION_MODELS:
+        raise ValueError("Выбрана неподдерживаемая зрительная модель")
+    return YandexGPTClient(
+        settings.yc_api_key,
+        settings.yc_folder_id,
+        model=settings.yc_vision_model,
     )
 
 
@@ -155,3 +230,7 @@ def solve_image(
     model: str | None = None,
 ) -> str:
     return build_gpt_client(model).solve_image(image, prompt, context_text)
+
+
+def solve_vision_image(image: bytes, prompt: str) -> str:
+    return build_vision_client().solve_vision_image(image, prompt)

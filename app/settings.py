@@ -18,13 +18,21 @@ ENV_PATH = ROOT.parent / ".env"
 CLIENT_ENV_NAME = "SMARTHELPER_ENV_FILE"
 PREFERENCES_ENV_NAME = "SMARTHELPER_SETTINGS_FILE"
 DEFAULT_YC_MODEL = "qwen3-235b-a22b-fp8/latest"
+DEFAULT_YC_VISION_MODEL = "qwen3.6-35b-a3b"
 DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 DEFAULT_RECORD_HOTKEY = "alt+q"
+DEFAULT_VISION_HOTKEY = "f1"
+DEFAULT_VISION_PROMPT = (
+    "Реши задание на изображении. Внимательно прочитай условие, формулы, дроби, "
+    "степени, графики, рисунки и варианты ответа. Сначала дай точный итоговый "
+    "ответ, затем кратко объясни решение. Если это тест, укажи номер варианта "
+    "и его текст."
+)
 DEFAULT_MOUSE_PROMPT = PROMPTS[0]
 LEGACY_DEFAULT_ACTION_HOTKEYS = tuple(f"ctrl+{index}" for index in range(1, 6))
 DEFAULT_ACTION_HOTKEYS = tuple(f"alt+{index}" for index in range(1, 6))
 DEFAULT_ACTION_PROMPTS = (PROMPTS[1], PROMPTS[2], PROMPTS[3], PROMPTS[5], PROMPTS[6])
-HOTKEYS_SETTINGS_VERSION = 2
+HOTKEYS_SETTINGS_VERSION = 3
 MODEL_OPTIONS = (
     ("Qwen3 235B — сложные задачи", "qwen3-235b-a22b-fp8/latest"),
     ("Alice AI — быстрый точный ответ", "aliceai-llm/latest"),
@@ -32,6 +40,7 @@ MODEL_OPTIONS = (
     ("DeepSeek V3.2 — расчёты и программирование", "deepseek-v32/latest"),
 )
 SUPPORTED_YC_MODELS = frozenset(model for _label, model in MODEL_OPTIONS)
+SUPPORTED_YC_VISION_MODELS = frozenset({DEFAULT_YC_VISION_MODEL})
 
 
 @dataclass(frozen=True)
@@ -44,6 +53,7 @@ class Settings:
     mix_device: str | None
     app_access_token: str = ""
     yc_model: str = DEFAULT_YC_MODEL
+    yc_vision_model: str = DEFAULT_YC_VISION_MODEL
 
 
 @dataclass(frozen=True)
@@ -55,6 +65,8 @@ class ClientSettings:
     mix_device: str | None
     yc_model: str = DEFAULT_YC_MODEL
     record_hotkey: str = DEFAULT_RECORD_HOTKEY
+    vision_hotkey: str = DEFAULT_VISION_HOTKEY
+    vision_prompt: str = DEFAULT_VISION_PROMPT
     mouse_prompt: str = DEFAULT_MOUSE_PROMPT
     action_hotkeys: tuple[str, ...] = DEFAULT_ACTION_HOTKEYS
     action_prompts: tuple[str, ...] = DEFAULT_ACTION_PROMPTS
@@ -65,6 +77,8 @@ class ClientSettings:
 class UserPreferences:
     yc_model: str = DEFAULT_YC_MODEL
     record_hotkey: str = DEFAULT_RECORD_HOTKEY
+    vision_hotkey: str = DEFAULT_VISION_HOTKEY
+    vision_prompt: str = DEFAULT_VISION_PROMPT
     mouse_prompt: str = DEFAULT_MOUSE_PROMPT
     action_hotkeys: tuple[str, ...] = DEFAULT_ACTION_HOTKEYS
     action_prompts: tuple[str, ...] = DEFAULT_ACTION_PROMPTS
@@ -171,13 +185,20 @@ def env_flag(name: str, default: bool = False) -> bool:
 
 
 def validate_hotkeys(
-    record_hotkey: str, action_hotkeys: Sequence[str]
+    record_hotkey: str,
+    action_hotkeys: Sequence[str],
+    vision_hotkey: str | None = None,
 ) -> tuple[str, tuple[str, ...]]:
     record = record_hotkey.strip().lower()
     actions = tuple(hotkey.strip().lower() for hotkey in action_hotkeys)
+    vision = vision_hotkey.strip().lower() if vision_hotkey is not None else None
     if not record or len(actions) != 5 or any(not hotkey for hotkey in actions):
         raise ValueError("Нужно задать клавишу микрофона и пять сочетаний команд")
-    all_hotkeys = (record, *actions)
+    if vision_hotkey is not None and not vision:
+        raise ValueError("Нужно задать клавишу зрительного режима")
+    all_hotkeys: tuple[str, ...] = (record, *actions)
+    if vision is not None:
+        all_hotkeys = (*all_hotkeys, vision)
     if len(set(all_hotkeys)) != len(all_hotkeys):
         raise ValueError("Сочетания клавиш не должны повторяться")
     return record, actions
@@ -204,6 +225,8 @@ def load_user_preferences() -> UserPreferences:
     if model not in SUPPORTED_YC_MODELS:
         model = DEFAULT_YC_MODEL
     record_hotkey = _text(data.get("record_hotkey"), DEFAULT_RECORD_HOTKEY).lower()
+    vision_hotkey = _text(data.get("vision_hotkey"), DEFAULT_VISION_HOTKEY).lower()
+    vision_prompt = _text(data.get("vision_prompt"), DEFAULT_VISION_PROMPT)
     mouse_prompt = _text(data.get("mouse_prompt"), DEFAULT_MOUSE_PROMPT)
     show_answer_overlay = data.get("show_answer_overlay", True)
     if not isinstance(show_answer_overlay, bool):
@@ -229,15 +252,18 @@ def load_user_preferences() -> UserPreferences:
 
     try:
         record_hotkey, validated_hotkeys = validate_hotkeys(
-            record_hotkey, action_hotkeys
+            record_hotkey, action_hotkeys, vision_hotkey
         )
     except ValueError:
         record_hotkey = DEFAULT_RECORD_HOTKEY
+        vision_hotkey = DEFAULT_VISION_HOTKEY
         validated_hotkeys = DEFAULT_ACTION_HOTKEYS
 
     return UserPreferences(
         yc_model=model,
         record_hotkey=record_hotkey,
+        vision_hotkey=vision_hotkey,
+        vision_prompt=vision_prompt,
         mouse_prompt=mouse_prompt,
         action_hotkeys=validated_hotkeys,
         action_prompts=tuple(action_prompts),
@@ -255,6 +281,10 @@ def load_settings() -> Settings:
         mix_device=os.getenv("MIX_DEVICE"),
         app_access_token=_require("APP_ACCESS_TOKEN"),
         yc_model=os.getenv("YC_MODEL", DEFAULT_YC_MODEL).strip() or DEFAULT_YC_MODEL,
+        yc_vision_model=(
+            os.getenv("YC_VISION_MODEL", DEFAULT_YC_VISION_MODEL).strip()
+            or DEFAULT_YC_VISION_MODEL
+        ),
     )
     os.environ["YC_FOLDER_ID"] = settings.yc_folder_id
     return settings
@@ -284,6 +314,8 @@ def load_client_settings(require_connection: bool = True) -> ClientSettings:
         mix_device=values.get("MIX_DEVICE") or None,
         yc_model=preferences.yc_model,
         record_hotkey=preferences.record_hotkey,
+        vision_hotkey=preferences.vision_hotkey,
+        vision_prompt=preferences.vision_prompt,
         mouse_prompt=preferences.mouse_prompt,
         action_hotkeys=preferences.action_hotkeys,
         action_prompts=preferences.action_prompts,
@@ -328,6 +360,8 @@ def save_client_preferences(
     record_hotkey: str,
     mouse_prompt: str,
     actions: Sequence[tuple[str, str]],
+    vision_hotkey: str = DEFAULT_VISION_HOTKEY,
+    vision_prompt: str = DEFAULT_VISION_PROMPT,
     show_answer_overlay: bool = True,
 ) -> UserPreferences:
     if yc_model not in SUPPORTED_YC_MODELS:
@@ -336,17 +370,27 @@ def save_client_preferences(
         raise ValueError("Нужно настроить пять команд")
 
     record_hotkey, action_hotkeys = validate_hotkeys(
-        record_hotkey, [hotkey for hotkey, _prompt in actions]
+        record_hotkey,
+        [hotkey for hotkey, _prompt in actions],
+        vision_hotkey,
     )
+    normalized_vision_hotkey = vision_hotkey.strip().lower()
+    normalized_vision_prompt = vision_prompt.strip()
     normalized_mouse_prompt = mouse_prompt.strip()
     action_prompts = tuple(prompt.strip() for _hotkey, prompt in actions)
-    if not normalized_mouse_prompt or any(not prompt for prompt in action_prompts):
+    if (
+        not normalized_vision_prompt
+        or not normalized_mouse_prompt
+        or any(not prompt for prompt in action_prompts)
+    ):
         raise ValueError("Подсказки не могут быть пустыми")
 
     data = {
         "hotkeys_version": HOTKEYS_SETTINGS_VERSION,
         "model": yc_model,
         "record_hotkey": record_hotkey,
+        "vision_hotkey": normalized_vision_hotkey,
+        "vision_prompt": normalized_vision_prompt,
         "mouse_prompt": normalized_mouse_prompt,
         "show_answer_overlay": show_answer_overlay,
         "actions": [

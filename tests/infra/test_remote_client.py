@@ -77,6 +77,25 @@ def test_remote_client_recognizes_image_and_sends_reading_context():
     assert calls[1][1]["files"]["image"][1] == b"QUESTION"
 
 
+def test_remote_client_sends_single_image_to_vision_endpoint():
+    calls = {}
+
+    def fake_post(url, **kwargs):
+        calls.update(url=url, kwargs=kwargs)
+        return _FakeResponse({"answer": "Ответ по изображению"})
+
+    client = RemoteServiceClient("http://server", "SECRET", http_post=fake_post)
+
+    answer = client.solve_vision_image(b"ONE_SCREEN", "Реши задачу")
+
+    assert answer == "Ответ по изображению"
+    assert calls["url"] == "http://server/v1/vision"
+    assert calls["kwargs"]["data"] == {"prompt": "Реши задачу"}
+    assert calls["kwargs"]["files"] == {
+        "image": ("screenshot.png", b"ONE_SCREEN", "image/png")
+    }
+
+
 def test_remote_client_sends_audio_file(tmp_path: Path):
     wav_path = tmp_path / "voice.wav"
     wav_path.write_bytes(b"WAV")

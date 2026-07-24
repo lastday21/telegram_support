@@ -28,6 +28,8 @@ def test_preferences_are_saved_for_next_launch(monkeypatch, tmp_path: Path):
     saved = settings.save_client_preferences(
         yc_model="aliceai-llm/latest",
         record_hotkey="CTRL+R",
+        vision_hotkey="F2",
+        vision_prompt="Реши по изображению",
         mouse_prompt="Ответь на вопрос",
         actions=[(f"CTRL+{index}", f"Подсказка {index}") for index in range(1, 6)],
         show_answer_overlay=False,
@@ -36,9 +38,13 @@ def test_preferences_are_saved_for_next_launch(monkeypatch, tmp_path: Path):
     payload = json.loads(preferences_path.read_text(encoding="utf-8"))
     assert payload["hotkeys_version"] == settings.HOTKEYS_SETTINGS_VERSION
     assert payload["model"] == "aliceai-llm/latest"
+    assert payload["vision_hotkey"] == "f2"
+    assert payload["vision_prompt"] == "Реши по изображению"
     assert payload["actions"][4]["hotkey"] == "ctrl+5"
     assert payload["show_answer_overlay"] is False
     assert saved.record_hotkey == "ctrl+r"
+    assert saved.vision_hotkey == "f2"
+    assert saved.vision_prompt == "Реши по изображению"
     assert saved.mouse_prompt == "Ответь на вопрос"
     assert saved.action_prompts[0] == "Подсказка 1"
     assert saved.show_answer_overlay is False
@@ -50,6 +56,8 @@ def test_saved_preferences_are_loaded(monkeypatch, tmp_path: Path):
     settings.save_client_preferences(
         yc_model="deepseek-v32/latest",
         record_hotkey="f8",
+        vision_hotkey="f2",
+        vision_prompt="Зрительная подсказка",
         mouse_prompt="Промпт мыши",
         actions=[(f"ctrl+{index}", f"Промпт {index}") for index in range(1, 6)],
         show_answer_overlay=False,
@@ -59,6 +67,8 @@ def test_saved_preferences_are_loaded(monkeypatch, tmp_path: Path):
 
     assert loaded.yc_model == "deepseek-v32/latest"
     assert loaded.record_hotkey == "f8"
+    assert loaded.vision_hotkey == "f2"
+    assert loaded.vision_prompt == "Зрительная подсказка"
     assert loaded.action_hotkeys == settings.LEGACY_DEFAULT_ACTION_HOTKEYS
     assert loaded.show_answer_overlay is False
 
@@ -93,6 +103,8 @@ def test_old_preferences_keep_answer_window_enabled(monkeypatch, tmp_path: Path)
     loaded = settings.load_user_preferences()
 
     assert loaded.show_answer_overlay is True
+    assert loaded.vision_hotkey == settings.DEFAULT_VISION_HOTKEY
+    assert loaded.vision_prompt == settings.DEFAULT_VISION_PROMPT
 
 
 def test_duplicate_hotkey_is_rejected():
@@ -100,6 +112,15 @@ def test_duplicate_hotkey_is_rejected():
         settings.validate_hotkeys(
             "ctrl+1",
             ["ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5"],
+        )
+
+
+def test_vision_hotkey_cannot_repeat_another_command():
+    with pytest.raises(ValueError, match="не должны повторяться"):
+        settings.validate_hotkeys(
+            "alt+q",
+            ["alt+1", "alt+2", "alt+3", "alt+4", "alt+5"],
+            "alt+3",
         )
 
 

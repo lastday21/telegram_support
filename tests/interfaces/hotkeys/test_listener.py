@@ -161,6 +161,70 @@ def test_handler_screenshot_flow():
     ]
 
 
+def test_vision_mode_uses_only_current_image_without_ocr_or_saved_context():
+    calls = {
+        "vision": [],
+        "messages": [],
+        "photos": [],
+    }
+    service = HotkeyService(
+        recorder=_FakeRecorder(None),
+        solve_image_fn=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("Обычный путь снимка не должен вызываться")
+        ),
+        solve_vision_image_fn=lambda image, prompt: (
+            calls["vision"].append((image, prompt)) or "Ответ Qwen 3.6"
+        ),
+        recognize_image_fn=lambda _image: (_ for _ in ()).throw(
+            AssertionError("Распознавание текста не должно вызываться")
+        ),
+        telegram_delivery=_ImmediateDelivery(
+            calls["messages"].append,
+            lambda photos, caption: calls["photos"].append((photos, caption)),
+        ),
+        answer_overlay=_FakeOverlay(),
+    )
+    service.reading_context.add("Ранее сохранённый большой текст")
+    service._pending_context_images.append(b"OLD_CONTEXT_SCREEN")
+
+    service._handle_captured_vision_prompt(b"CURRENT_SCREEN", "Реши задачу")
+
+    assert calls["vision"] == [(b"CURRENT_SCREEN", "Реши задачу")]
+    assert calls["photos"] == [
+        ((b"CURRENT_SCREEN",), "Снимок для Qwen 3.6"),
+    ]
+    assert calls["messages"] == ["Ответ Qwen 3.6"]
+    assert service.reading_context.text == "Ранее сохранённый большой текст"
+    assert service._pending_context_images == [b"OLD_CONTEXT_SCREEN"]
+
+
+def test_vision_hotkey_captures_image_before_queue_processing():
+    submitted = []
+
+    class _Queue:
+        def submit(self, target, args=()):
+            submitted.append((target, args))
+            return True
+
+        def close(self):
+            pass
+
+    service = HotkeyService(
+        recorder=_FakeRecorder(None),
+        vision_prompt="Зрительная подсказка",
+        action_queue=_Queue(),
+        take_screenshot_fn=lambda: b"CURRENT_SCREEN",
+    )
+
+    assert service.submit_vision_prompt() is True
+    assert submitted == [
+        (
+            service._handle_captured_vision_prompt,
+            (b"CURRENT_SCREEN", "Зрительная подсказка"),
+        )
+    ]
+
+
 def test_long_text_is_collected_and_used_for_follow_up_questions():
     calls = {
         "recognized": [],
