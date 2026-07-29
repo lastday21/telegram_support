@@ -6,6 +6,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any, Protocol
 
 from requests import RequestException
@@ -13,6 +14,7 @@ from requests import RequestException
 from app.domain.actions import SerialActionQueue
 from app.domain.audio.recorder import VoiceRecorder
 from app.domain.reading_context import ReadingContext
+from app.domain.request_journal import RequestJournal
 from app.domain.screenshot_archive import save_screenshot
 from app.domain.status import AppStatus
 from app.domain.telegram_delivery import TelegramDeliveryQueue
@@ -26,6 +28,8 @@ from app.settings import (
     DEFAULT_RECORD_HOTKEY,
     DEFAULT_VISION_HOTKEY,
     DEFAULT_VISION_PROMPT,
+    DEFAULT_YC_MODEL,
+    DEFAULT_YC_VISION_MODEL,
     ClientSettings,
     get_client_settings,
 )
@@ -70,6 +74,21 @@ class TelegramDelivery(Protocol):
     def close(self) -> None: ...
 
 
+class RequestJournalLike(Protocol):
+    def record(
+        self,
+        *,
+        command: str,
+        prompt: str,
+        model: str,
+        duration_ms: int,
+        screenshot_path: Path | None = None,
+        answer: str | None = None,
+        error: Exception | None = None,
+        context_chars: int = 0,
+    ) -> None: ...
+
+
 class StopEvent(Protocol):
     def wait(self) -> object: ...
 
@@ -88,6 +107,11 @@ class _NullAnswerOverlay:
         pass
 
 
+class _NullRequestJournal:
+    def record(self, **_kwargs) -> None:
+        pass
+
+
 try:
     import keyboard as _keyboard_module
 
@@ -99,12 +123,7 @@ except ImportError:  # pragma: no cover - зависит от окружения
 def _default_take_screenshot() -> bytes:
     from app.domain.ocr.capture import take_screenshot
 
-    image = take_screenshot()
-    try:
-        save_screenshot(image)
-    except Exception:
-        logger.exception("Не удалось сохранить снимок для последующего разбора")
-    return image
+    return take_screenshot()
 
 
 def _missing_server_client(*_args, **_kwargs):
@@ -125,6 +144,7 @@ class HotkeyService:
         send_media_group_fn: Callable[[Sequence[bytes], str | None], None]
         | None = None,
         take_screenshot_fn: Callable[[], bytes] | None = None,
+        save_screenshot_fn: Callable[[bytes], Path | None] | None = None,
         ping_fn: Callable[[], bool] | None = None,
         status_callback: StatusCallback | None = None,
         action_queue: ActionQueue | None = None,
@@ -140,6 +160,10 @@ class HotkeyService:
         answer_overlay: AnswerOverlay | None = None,
         telegram_delivery: TelegramDelivery | None = None,
         reading_context: ReadingContext | None = None,
+        request_journal: RequestJournalLike | None = None,
+        answer_model: str = DEFAULT_YC_MODEL,
+        vision_model: str = DEFAULT_YC_VISION_MODEL,
+        request_clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self.recorder = recorder
         self.transcribe = transcribe_fn or _missing_server_client
@@ -149,6 +173,12 @@ class HotkeyService:
         self.recognize_image = recognize_image_fn or _missing_server_client
         self.send_message = send_message_fn or _missing_server_client
         self.take_screenshot = take_screenshot_fn or _default_take_screenshot
+        if save_screenshot_fn is not None:
+            self.save_screenshot = save_screenshot_fn
+        elif take_screenshot_fn is None:
+            self.save_screenshot = save_screenshot
+        else:
+            self.save_screenshot = lambda _image: None
         self.ping = ping_fn
         self.status_callback = status_callback
         self.prompts = list(prompts)
@@ -162,6 +192,10 @@ class HotkeyService:
         self._processing = False
         self._state_lock = threading.Lock()
         self._clock = clock
+        self._request_clock = request_clock
+        self.request_journal = request_journal or _NullRequestJournal()
+        self.answer_model = answer_model
+        self.vision_model = vision_model
         self._last_hotkey_at: dict[str, float] = {}
         self._keyboard_impl = None
         self._middle_click_factory = middle_click_factory
@@ -213,6 +247,8 @@ class HotkeyService:
             return
 
         self._report(AppStatus.WORKING, "Останавливаю и обрабатываю запись")
+        request_started_at = self._request_clock()
+        text = ""
         try:
             wav = self.recorder.stop()
             with self._state_lock:
@@ -227,8 +263,22 @@ class HotkeyService:
             self._show_answer(answer)
             self._queue_telegram(f"Ты продиктовал:\n{text}")
             self._queue_telegram(f"Ответ:\n{answer}")
+            self._record_request(
+                command=self.record_hotkey,
+                prompt=text,
+                model=self.answer_model,
+                started_at=request_started_at,
+                answer=answer,
+            )
             self._report(AppStatus.READY, "Ответ готов", True)
         except Exception as exc:
+            self._record_request(
+                command=self.record_hotkey,
+                prompt=text,
+                model=self.answer_model,
+                started_at=request_started_at,
+                error=exc,
+            )
             with self._state_lock:
                 self.is_recording = False
             self._report_error("Не удалось обработать запись", exc)
@@ -259,17 +309,42 @@ class HotkeyService:
             return
 
         self._report(AppStatus.WORKING, "Обрабатываю снимок экрана")
+        request_started_at = self._request_clock()
         try:
             self.answer_overlay.hide()
-            image = self.take_screenshot()
-            self._process_prompt_image(image, prompt)
+            image, screenshot_path = self._capture_screenshot()
         except Exception as exc:
+            self._record_request(
+                command="screen",
+                prompt=prompt,
+                model=self.answer_model,
+                started_at=request_started_at,
+                error=exc,
+            )
             self._report_error("Не удалось обработать снимок", exc)
+        else:
+            try:
+                self._run_prompt_request(
+                    image,
+                    prompt,
+                    "screen",
+                    screenshot_path,
+                    request_started_at,
+                )
+            except Exception as exc:
+                self._report_error("Не удалось обработать снимок", exc)
         finally:
             with self._state_lock:
                 self._processing = False
 
-    def _handle_captured_prompt(self, image: bytes, prompt: str) -> None:
+    def _handle_captured_prompt(
+        self,
+        image: bytes,
+        prompt: str,
+        command: str = "screen",
+        screenshot_path: Path | None = None,
+        request_started_at: float | None = None,
+    ) -> None:
         with self._state_lock:
             if self._processing or self.is_recording:
                 busy = True
@@ -291,14 +366,20 @@ class HotkeyService:
 
         self._report(AppStatus.WORKING, "Обрабатываю сохранённый снимок экрана")
         try:
-            self._process_prompt_image(image, prompt)
+            self._run_prompt_request(
+                image,
+                prompt,
+                command,
+                screenshot_path,
+                request_started_at,
+            )
         except Exception as exc:
             self._report_error("Не удалось обработать снимок", exc)
         finally:
             with self._state_lock:
                 self._processing = False
 
-    def _process_prompt_image(self, image: bytes, prompt: str) -> None:
+    def _process_prompt_image(self, image: bytes, prompt: str) -> str:
         self._queue_screenshots(image)
         context_text = self.reading_context.text
         if context_text:
@@ -308,8 +389,15 @@ class HotkeyService:
         self._show_answer(answer)
         self._queue_telegram(answer)
         self._report(AppStatus.READY, "Ответ по снимку готов", True)
+        return answer
 
-    def _handle_captured_vision_prompt(self, image: bytes, prompt: str) -> None:
+    def _handle_captured_vision_prompt(
+        self,
+        image: bytes,
+        prompt: str,
+        screenshot_path: Path | None = None,
+        request_started_at: float | None = None,
+    ) -> None:
         with self._state_lock:
             if self._processing or self.is_recording:
                 busy = True
@@ -330,13 +418,34 @@ class HotkeyService:
             return
 
         self._report(AppStatus.WORKING, "Qwen 3.6 изучает снимок")
+        started_at = (
+            request_started_at
+            if request_started_at is not None
+            else self._request_clock()
+        )
         try:
             self._queue_vision_screenshot(image)
             answer = self.solve_vision_image(image, prompt)
             self._show_answer(answer)
             self._queue_telegram(answer)
+            self._record_request(
+                command=self.vision_hotkey,
+                prompt=prompt,
+                model=self.vision_model,
+                started_at=started_at,
+                screenshot_path=screenshot_path,
+                answer=answer,
+            )
             self._report(AppStatus.READY, "Ответ Qwen 3.6 готов", True)
         except Exception as exc:
+            self._record_request(
+                command=self.vision_hotkey,
+                prompt=prompt,
+                model=self.vision_model,
+                started_at=started_at,
+                screenshot_path=screenshot_path,
+                error=exc,
+            )
             self._report_error("Не удалось обработать снимок через Qwen 3.6", exc)
         finally:
             with self._state_lock:
@@ -363,21 +472,45 @@ class HotkeyService:
             return
 
         self._report(AppStatus.WORKING, "Сохраняю часть большого текста")
+        request_started_at = self._request_clock()
         try:
             self.answer_overlay.hide()
-            image = self.take_screenshot()
-            self._store_reading_context(image)
+            image, screenshot_path = self._capture_screenshot()
         except Exception as exc:
+            self._record_request(
+                command="alt+middle-click",
+                prompt="Добавить часть большого текста",
+                model="yandex-ocr",
+                started_at=request_started_at,
+                error=exc,
+            )
             self._report_error("Не удалось сохранить часть текста", exc)
+        else:
+            try:
+                self._store_reading_context(
+                    image,
+                    screenshot_path,
+                    request_started_at,
+                )
+            except Exception as exc:
+                self._report_error("Не удалось сохранить часть текста", exc)
         finally:
             with self._state_lock:
                 self._processing = False
 
     def clear_reading_context(self) -> None:
+        started_at = self._request_clock()
         update = self.reading_context.clear()
         with self._state_lock:
             self._pending_context_images.clear()
         logger.info("Контекст большого текста очищен")
+        self._record_request(
+            command="ctrl+middle-click",
+            prompt="Очистить большой текст",
+            model="local",
+            started_at=started_at,
+            answer=f"Очищено {update.total_chars} знаков",
+        )
         self._report(
             AppStatus.READY,
             f"Большой текст очищен: {update.total_chars} знаков",
@@ -405,18 +538,26 @@ class HotkeyService:
         )
 
     def submit_prompt(self, prompt: str, index: int) -> bool:
+        command = (
+            self.action_hotkeys[index - 1]
+            if 0 < index <= len(self.action_hotkeys)
+            else f"command-{index}"
+        )
         return self._submit_captured_prompt(
             f"prompt-{index}",
             prompt,
+            command,
         )
 
     def submit_mouse_prompt(self) -> bool:
         return self._submit_captured_prompt(
             "mouse-prompt",
             self.mouse_prompt,
+            "middle-click",
         )
 
     def submit_vision_prompt(self) -> bool:
+        request_started_at = self._request_clock()
         if not self._reserve_hotkey("vision-prompt"):
             return False
         with self._state_lock:
@@ -426,19 +567,35 @@ class HotkeyService:
             return False
         try:
             self.answer_overlay.hide()
-            image = self.take_screenshot()
+            image, screenshot_path = self._capture_screenshot()
         except Exception as exc:
+            self._record_request(
+                command=self.vision_hotkey,
+                prompt=self.vision_prompt,
+                model=self.vision_model,
+                started_at=request_started_at,
+                error=exc,
+            )
             self._report_error("Не удалось снять задание для Qwen 3.6", exc)
             return False
         accepted = self.action_queue.submit(
             self._handle_captured_vision_prompt,
-            (image, self.vision_prompt),
+            (image, self.vision_prompt, screenshot_path, request_started_at),
         )
         if not accepted:
+            self._record_request(
+                command=self.vision_hotkey,
+                prompt=self.vision_prompt,
+                model=self.vision_model,
+                started_at=request_started_at,
+                screenshot_path=screenshot_path,
+                error=RuntimeError("Очередь действий заполнена"),
+            )
             self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
         return accepted
 
-    def _submit_captured_prompt(self, key: str, prompt: str) -> bool:
+    def _submit_captured_prompt(self, key: str, prompt: str, command: str) -> bool:
+        request_started_at = self._request_clock()
         if not self._reserve_hotkey(key):
             return False
         with self._state_lock:
@@ -448,19 +605,35 @@ class HotkeyService:
             return False
         try:
             self.answer_overlay.hide()
-            image = self.take_screenshot()
+            image, screenshot_path = self._capture_screenshot()
         except Exception as exc:
+            self._record_request(
+                command=command,
+                prompt=prompt,
+                model=self.answer_model,
+                started_at=request_started_at,
+                error=exc,
+            )
             self._report_error("Не удалось снять задание", exc)
             return False
         accepted = self.action_queue.submit(
             self._handle_captured_prompt,
-            (image, prompt),
+            (image, prompt, command, screenshot_path, request_started_at),
         )
         if not accepted:
+            self._record_request(
+                command=command,
+                prompt=prompt,
+                model=self.answer_model,
+                started_at=request_started_at,
+                screenshot_path=screenshot_path,
+                error=RuntimeError("Очередь действий заполнена"),
+            )
             self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
         return accepted
 
     def submit_reading_context(self) -> bool:
+        request_started_at = self._request_clock()
         if not self._reserve_hotkey("reading-context"):
             return False
         with self._state_lock:
@@ -470,12 +643,30 @@ class HotkeyService:
             return False
         try:
             self.answer_overlay.hide()
-            image = self.take_screenshot()
+            image, screenshot_path = self._capture_screenshot()
         except Exception as exc:
+            self._record_request(
+                command="alt+middle-click",
+                prompt="Добавить часть большого текста",
+                model="yandex-ocr",
+                started_at=request_started_at,
+                error=exc,
+            )
             self._report_error("Не удалось снять часть большого текста", exc)
             return False
-        accepted = self.action_queue.submit(self._store_reading_context, (image,))
+        accepted = self.action_queue.submit(
+            self._store_reading_context,
+            (image, screenshot_path, request_started_at),
+        )
         if not accepted:
+            self._record_request(
+                command="alt+middle-click",
+                prompt="Добавить часть большого текста",
+                model="yandex-ocr",
+                started_at=request_started_at,
+                screenshot_path=screenshot_path,
+                error=RuntimeError("Очередь действий заполнена"),
+            )
             self._report(AppStatus.BUSY, "Очередь действий заполнена", True)
         return accepted
 
@@ -620,11 +811,32 @@ class HotkeyService:
             self._last_hotkey_at[key] = now
         return True
 
-    def _store_reading_context(self, image: bytes) -> None:
+    def _store_reading_context(
+        self,
+        image: bytes,
+        screenshot_path: Path | None = None,
+        request_started_at: float | None = None,
+    ) -> None:
         self._report(AppStatus.WORKING, "Распознаю часть большого текста")
+        started_at = (
+            request_started_at
+            if request_started_at is not None
+            else self._request_clock()
+        )
         with self._state_lock:
             self._pending_context_images.append(image)
-        text = self.recognize_image(image)
+        try:
+            text = self.recognize_image(image)
+        except Exception as exc:
+            self._record_request(
+                command="alt+middle-click",
+                prompt="Добавить часть большого текста",
+                model="yandex-ocr",
+                started_at=started_at,
+                screenshot_path=screenshot_path,
+                error=exc,
+            )
+            raise
         update = self.reading_context.add(text)
         if not text.strip():
             message = "На снимке не найден текст"
@@ -638,7 +850,89 @@ class HotkeyService:
             if update.truncated:
                 message += "; начало сокращено"
         logger.info(message)
+        self._record_request(
+            command="alt+middle-click",
+            prompt="Добавить часть большого текста",
+            model="yandex-ocr",
+            started_at=started_at,
+            screenshot_path=screenshot_path,
+            answer=text,
+            context_chars=update.total_chars,
+        )
         self._report(AppStatus.READY, message)
+
+    def _capture_screenshot(self) -> tuple[bytes, Path | None]:
+        image = self.take_screenshot()
+        screenshot_path = None
+        try:
+            screenshot_path = self.save_screenshot(image)
+        except Exception:
+            logger.exception("Не удалось сохранить снимок для последующего разбора")
+        return image, screenshot_path
+
+    def _run_prompt_request(
+        self,
+        image: bytes,
+        prompt: str,
+        command: str,
+        screenshot_path: Path | None,
+        request_started_at: float | None,
+    ) -> None:
+        started_at = (
+            request_started_at
+            if request_started_at is not None
+            else self._request_clock()
+        )
+        context_chars = len(self.reading_context.text)
+        try:
+            answer = self._process_prompt_image(image, prompt)
+        except Exception as exc:
+            self._record_request(
+                command=command,
+                prompt=prompt,
+                model=self.answer_model,
+                started_at=started_at,
+                screenshot_path=screenshot_path,
+                error=exc,
+                context_chars=context_chars,
+            )
+            raise
+        self._record_request(
+            command=command,
+            prompt=prompt,
+            model=self.answer_model,
+            started_at=started_at,
+            screenshot_path=screenshot_path,
+            answer=answer,
+            context_chars=context_chars,
+        )
+
+    def _record_request(
+        self,
+        *,
+        command: str,
+        prompt: str,
+        model: str,
+        started_at: float,
+        screenshot_path: Path | None = None,
+        answer: str | None = None,
+        error: Exception | None = None,
+        context_chars: int = 0,
+    ) -> None:
+        duration_ms = max(0, round((self._request_clock() - started_at) * 1000))
+        try:
+            self.request_journal.record(
+                command=command,
+                prompt=prompt,
+                model=model,
+                duration_ms=duration_ms,
+                screenshot_path=screenshot_path,
+                answer=answer,
+                error=error,
+                context_chars=context_chars,
+            )
+        except Exception:
+            logger.exception("Не удалось записать скрытый журнал запросов")
 
     def _report(
         self,
@@ -760,6 +1054,8 @@ def build_hotkey_service(
         action_hotkeys=settings.action_hotkeys,
         prompts=settings.action_prompts,
         answer_overlay=answer_overlay,
+        request_journal=RequestJournal(),
+        answer_model=settings.yc_model,
     )
 
 

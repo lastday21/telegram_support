@@ -60,9 +60,11 @@ def test_default_screenshot_is_saved_for_later_review(monkeypatch):
     )
     monkeypatch.setattr(listener, "save_screenshot", saved.append)
 
-    image = listener._default_take_screenshot()
+    service = HotkeyService(recorder=_FakeRecorder(None))
+    image, screenshot_path = service._capture_screenshot()
 
     assert image == b"SCREEN"
+    assert screenshot_path is None
     assert saved == [b"SCREEN"]
 
 
@@ -77,7 +79,9 @@ def test_archive_failure_does_not_break_screenshot(monkeypatch):
 
     monkeypatch.setattr(listener, "save_screenshot", fail_to_save)
 
-    assert listener._default_take_screenshot() == b"SCREEN"
+    service = HotkeyService(recorder=_FakeRecorder(None))
+
+    assert service._capture_screenshot() == (b"SCREEN", None)
 
 
 def test_toggle_rec_start_and_stop(tmp_path):
@@ -166,6 +170,7 @@ def test_vision_mode_uses_only_current_image_without_ocr_or_saved_context():
         "vision": [],
         "messages": [],
         "photos": [],
+        "journal": [],
     }
     service = HotkeyService(
         recorder=_FakeRecorder(None),
@@ -183,6 +188,12 @@ def test_vision_mode_uses_only_current_image_without_ocr_or_saved_context():
             lambda photos, caption: calls["photos"].append((photos, caption)),
         ),
         answer_overlay=_FakeOverlay(),
+        request_journal=type(
+            "_Journal",
+            (),
+            {"record": lambda _self, **entry: calls["journal"].append(entry)},
+        )(),
+        request_clock=iter((10.0, 11.25)).__next__,
     )
     service.reading_context.add("Ранее сохранённый большой текст")
     service._pending_context_images.append(b"OLD_CONTEXT_SCREEN")
@@ -194,12 +205,25 @@ def test_vision_mode_uses_only_current_image_without_ocr_or_saved_context():
         ((b"CURRENT_SCREEN",), "Снимок для Qwen 3.6"),
     ]
     assert calls["messages"] == ["Ответ Qwen 3.6"]
+    assert calls["journal"] == [
+        {
+            "command": "f1",
+            "prompt": "Реши задачу",
+            "model": "qwen3.6-35b-a3b",
+            "duration_ms": 1250,
+            "screenshot_path": None,
+            "answer": "Ответ Qwen 3.6",
+            "error": None,
+            "context_chars": 0,
+        }
+    ]
     assert service.reading_context.text == "Ранее сохранённый большой текст"
     assert service._pending_context_images == [b"OLD_CONTEXT_SCREEN"]
 
 
-def test_vision_hotkey_captures_image_before_queue_processing():
+def test_vision_hotkey_captures_image_before_queue_processing(tmp_path):
     submitted = []
+    saved_path = tmp_path / "screenshot.png"
 
     class _Queue:
         def submit(self, target, args=()):
@@ -214,15 +238,17 @@ def test_vision_hotkey_captures_image_before_queue_processing():
         vision_prompt="Зрительная подсказка",
         action_queue=_Queue(),
         take_screenshot_fn=lambda: b"CURRENT_SCREEN",
+        save_screenshot_fn=lambda _image: saved_path,
     )
 
     assert service.submit_vision_prompt() is True
-    assert submitted == [
-        (
-            service._handle_captured_vision_prompt,
-            (b"CURRENT_SCREEN", "Зрительная подсказка"),
-        )
-    ]
+    assert submitted[0][0] == service._handle_captured_vision_prompt
+    assert submitted[0][1][:3] == (
+        b"CURRENT_SCREEN",
+        "Зрительная подсказка",
+        saved_path,
+    )
+    assert isinstance(submitted[0][1][3], float)
 
 
 def test_long_text_is_collected_and_used_for_follow_up_questions():
@@ -485,11 +511,16 @@ def test_middle_click_submits_universal_prompt():
     service.register_hotkeys(keyboard_module_override=_Keyboard())
 
     assert submitted[0][0] == service._handle_captured_prompt
-    assert submitted[0][1] == (b"QUESTION_SCREEN", "Универсальный")
+    assert submitted[0][1][:4] == (
+        b"QUESTION_SCREEN",
+        "Универсальный",
+        "middle-click",
+        None,
+    )
     service._middle_click_hook.context_handler()
     service._middle_click_hook.clear_context_handler()
     assert submitted[1][0] == service._store_reading_context
-    assert submitted[1][1] == (b"CONTEXT_SCREEN",)
+    assert submitted[1][1][:2] == (b"CONTEXT_SCREEN", None)
     assert submitted[2][0] == service.clear_reading_context
     service.close()
     assert stopped == [True]
@@ -528,4 +559,9 @@ def test_seven_context_screens_are_captured_before_queue_processing():
         b"QUESTION",
     ]
     assert submitted[-1][0] == service._handle_captured_prompt
-    assert submitted[-1][1] == (b"QUESTION", service.mouse_prompt)
+    assert submitted[-1][1][:4] == (
+        b"QUESTION",
+        service.mouse_prompt,
+        "middle-click",
+        None,
+    )
