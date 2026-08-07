@@ -32,7 +32,6 @@ from app.interfaces.messengers.sender import (
 )
 from app.interfaces.messengers.sender import send_message as send_messenger_message
 from app.interfaces.messengers.sender import send_photo as send_messenger_photo
-from app.interfaces.telegram.sender import send_media_group, send_message, send_photo
 from app.settings import SUPPORTED_YC_MODELS, get_settings
 
 logger = logging.getLogger(__name__)
@@ -68,11 +67,6 @@ def create_app(
     solve_vision_image_fn: Callable[[bytes, str], str] = solve_vision_image,
     recognize_image_fn: Callable[[bytes], str] = recognize_text,
     transcribe_fn: Callable[[Path], str] = transcribe,
-    send_message_fn: Callable[[str, str | None], None] = send_message,
-    send_photo_fn: Callable[[bytes, str | None, str | None], None] = send_photo,
-    send_media_group_fn: Callable[
-        [list[bytes], str | None, str | None], None
-    ] = send_media_group,
     send_messenger_message_fn: Callable[
         [str, str | None], None
     ] = send_messenger_message,
@@ -267,7 +261,7 @@ def create_app(
 
     @application.post("/v1/telegram/message", dependencies=[Depends(require_access)])
     def telegram_message(request: MessageRequest) -> dict[str, bool]:
-        send_message_fn(request.text, request.chat_id)
+        send_messenger_message_fn(request.text, request.chat_id)
         return {"sent": True}
 
     @application.post("/v1/telegram/photo", dependencies=[Depends(require_access)])
@@ -277,7 +271,7 @@ def create_app(
         chat_id: str = Form(""),
     ) -> dict[str, bool]:
         photo_bytes = _read_limited(photo, MAX_IMAGE_SIZE)
-        send_photo_fn(photo_bytes, caption or None, chat_id or None)
+        send_messenger_photo_fn(photo_bytes, caption or None, chat_id or None)
         return {"sent": True}
 
     @application.post(
@@ -295,7 +289,7 @@ def create_app(
                 detail="Альбом должен содержать от 2 до 10 снимков",
             )
         photo_bytes = [_read_limited(photo, MAX_IMAGE_SIZE) for photo in photos]
-        send_media_group_fn(photo_bytes, caption or None, chat_id or None)
+        send_messenger_media_group_fn(photo_bytes, caption or None, chat_id or None)
         return {"sent": True}
 
     @application.post("/v1/messengers/message", dependencies=[Depends(require_access)])

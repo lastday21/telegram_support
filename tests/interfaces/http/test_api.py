@@ -59,17 +59,6 @@ def _build_client(calls: dict) -> TestClient:
             calls.update(recognized_image=image) or "Распознанный снимок"
         ),
         transcribe_fn=transcribe,
-        send_message_fn=lambda text, chat_id: calls.update(
-            message=text, message_chat_id=chat_id
-        ),
-        send_photo_fn=lambda photo, caption, chat_id: calls.update(
-            photo=photo, caption=caption, photo_chat_id=chat_id
-        ),
-        send_media_group_fn=lambda photos, caption, chat_id: calls.update(
-            photos=photos,
-            album_caption=caption,
-            album_chat_id=chat_id,
-        ),
         send_messenger_message_fn=lambda text, chat_id: calls.update(
             messenger_message=text,
             messenger_message_chat_id=chat_id,
@@ -284,14 +273,14 @@ def test_telegram_actions_are_proxied():
     assert message_response.json() == {"sent": True}
     assert photo_response.json() == {"sent": True}
     assert album_response.json() == {"sent": True}
-    assert calls["message"] == "Сообщение"
-    assert calls["message_chat_id"] == "123456"
-    assert calls["photo"] == b"PNG"
-    assert calls["caption"] == "Подпись"
-    assert calls["photo_chat_id"] == "-123456"
-    assert calls["photos"] == [b"PAGE_1", b"PAGE_2"]
-    assert calls["album_caption"] == "Альбом"
-    assert calls["album_chat_id"] == "-123456"
+    assert calls["messenger_message"] == "Сообщение"
+    assert calls["messenger_message_chat_id"] == "123456"
+    assert calls["messenger_photo"] == b"PNG"
+    assert calls["messenger_caption"] == "Подпись"
+    assert calls["messenger_photo_chat_id"] == "-123456"
+    assert calls["messenger_photos"] == [b"PAGE_1", b"PAGE_2"]
+    assert calls["messenger_album_caption"] == "Альбом"
+    assert calls["messenger_album_chat_id"] == "-123456"
 
 
 def test_messenger_actions_are_proxied():
