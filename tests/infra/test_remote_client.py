@@ -117,7 +117,7 @@ def test_remote_client_sends_audio_file(tmp_path: Path):
     }
 
 
-def test_remote_client_proxies_telegram_photo():
+def test_remote_client_proxies_photo_to_all_messengers():
     calls = {}
 
     def fake_post(url, **kwargs):
@@ -130,13 +130,13 @@ def test_remote_client_proxies_telegram_photo():
     client.send_photo(b"PNG", "Подпись")
 
     assert calls == {
-        "url": "http://server/v1/telegram/photo",
+        "url": "http://server/v1/messengers/photo",
         "data": {"caption": "Подпись"},
         "photo": b"PNG",
     }
 
 
-def test_remote_client_proxies_telegram_media_group():
+def test_remote_client_proxies_media_group_to_all_messengers():
     calls = {}
 
     def fake_post(url, **kwargs):
@@ -154,13 +154,13 @@ def test_remote_client_proxies_telegram_media_group():
     client.send_media_group([b"PAGE_1", b"PAGE_2"], "Снимки задания")
 
     assert calls == {
-        "url": "http://server/v1/telegram/media-group",
+        "url": "http://server/v1/messengers/media-group",
         "data": {"caption": "Снимки задания", "chat_id": "-123456"},
         "photos": [b"PAGE_1", b"PAGE_2"],
     }
 
 
-def test_remote_client_sends_selected_telegram_chat_id():
+def test_remote_client_sends_message_to_all_messengers():
     calls = {}
 
     def fake_post(url, **kwargs):
@@ -174,7 +174,7 @@ def test_remote_client_sends_selected_telegram_chat_id():
     client.send_message("Ответ")
 
     assert calls == {
-        "url": "http://server/v1/telegram/message",
+        "url": "http://server/v1/messengers/message",
         "json": {"text": "Ответ", "chat_id": "-123456"},
     }
 

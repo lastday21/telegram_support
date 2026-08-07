@@ -3,9 +3,17 @@ services:
     image: ghcr.io/lastday21/telegram_support:latest
     build:
       context: .
+      extra_hosts:
+        - "pypi.org=151.101.0.223"
+        - "files.pythonhosted.org=151.101.0.223"
     env_file:
       - .env
       - .env.access
+      - .env.vk
+    extra_hosts:
+      - "api.telegram.org:149.154.166.110"
+      - "llm.api.cloud.yandex.net:158.160.54.160"
+      - "api.vk.com:87.240.137.208"
     ports:
       - "${SERVER_BIND_ADDRESS:-127.0.0.1}:${SERVER_PORT:-8000}:8000"
     restart: unless-stopped
@@ -14,15 +22,47 @@ services:
     image: ghcr.io/lastday21/telegram_support:latest
     build:
       context: .
+      extra_hosts:
+        - "pypi.org=151.101.0.223"
+        - "files.pythonhosted.org=151.101.0.223"
     env_file:
       - .env
       - .env.access
+      - .env.vk
+    extra_hosts:
+      - "api.telegram.org:149.154.166.110"
+      - "llm.api.cloud.yandex.net:158.160.54.160"
     environment:
       SMARTHELPER_SERVER_URL: http://server:8000
     depends_on:
       server:
         condition: service_healthy
     command: ["python", "-m", "app.interfaces.telegram.bot"]
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  vk-bot:
+    image: ghcr.io/lastday21/telegram_support:latest
+    build:
+      context: .
+      extra_hosts:
+        - "pypi.org=151.101.0.223"
+        - "files.pythonhosted.org=151.101.0.223"
+    env_file:
+      - .env
+      - .env.access
+      - .env.vk
+    extra_hosts:
+      - "api.vk.com:87.240.137.208"
+      - "lp.vk.com:93.186.237.7"
+      - "llm.api.cloud.yandex.net:158.160.54.160"
+    environment:
+      SMARTHELPER_SERVER_URL: http://server:8000
+    depends_on:
+      server:
+        condition: service_healthy
+    command: ["python", "-m", "app.interfaces.vk.bot"]
     healthcheck:
       disable: true
     restart: unless-stopped

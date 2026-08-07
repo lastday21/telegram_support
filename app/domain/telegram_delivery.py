@@ -25,7 +25,7 @@ class TelegramDeliveryQueue:
         send_message: Callable[[str], None],
         send_photo: Callable[[bytes, str | None], None] | None = None,
         send_media_group: Callable[[Sequence[bytes], str | None], None] | None = None,
-        retry_delays: Sequence[float] = (1, 3),
+        retry_delays: Sequence[float] = (1, 3, 10, 30),
         max_pending: int = 16,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:

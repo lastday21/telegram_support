@@ -47,7 +47,7 @@ def test_create_app_uses_token_from_settings(monkeypatch):
 def test_main_runs_polling_on_created_app(monkeypatch):
     calls = {}
     fake_app = types.SimpleNamespace(
-        run_polling=lambda: calls.__setitem__("run_polling_called", True)
+        run_polling=lambda **kwargs: calls.__setitem__("run_polling", kwargs)
     )
     settings = Settings(
         yc_api_key="KEY",
@@ -70,7 +70,7 @@ def test_main_runs_polling_on_created_app(monkeypatch):
 
     bot.main()
 
-    assert calls["run_polling_called"] is True
+    assert calls["run_polling"] == {"bootstrap_retries": -1}
     assert calls["create_app"]["solve_text_fn"] == fake_client.solve_text
 
 

@@ -54,6 +54,10 @@ class Settings:
     app_access_token: str = ""
     yc_model: str = DEFAULT_YC_MODEL
     yc_vision_model: str = DEFAULT_YC_VISION_MODEL
+    vk_group_token: str = ""
+    vk_group_id: str = ""
+    vk_user_id: str = ""
+    vk_api_version: str = "5.199"
 
 
 @dataclass(frozen=True)
@@ -285,7 +289,24 @@ def load_settings() -> Settings:
             os.getenv("YC_VISION_MODEL", DEFAULT_YC_VISION_MODEL).strip()
             or DEFAULT_YC_VISION_MODEL
         ),
+        vk_group_token=os.getenv("VK_GROUP_TOKEN", "").strip(),
+        vk_group_id=os.getenv("VK_GROUP_ID", "").strip(),
+        vk_user_id=os.getenv("VK_USER_ID", "").strip(),
+        vk_api_version=os.getenv("VK_API_VERSION", "5.199").strip() or "5.199",
     )
+    vk_values = (
+        settings.vk_group_token,
+        settings.vk_group_id,
+        settings.vk_user_id,
+    )
+    if any(vk_values) and not all(vk_values):
+        raise RuntimeError(
+            "Для ВКонтакте нужно задать VK_GROUP_TOKEN, VK_GROUP_ID и VK_USER_ID"
+        )
+    if settings.vk_group_id and not settings.vk_group_id.isdigit():
+        raise RuntimeError("VK_GROUP_ID должен быть числом")
+    if settings.vk_user_id and not settings.vk_user_id.isdigit():
+        raise RuntimeError("VK_USER_ID должен быть числом")
     os.environ["YC_FOLDER_ID"] = settings.yc_folder_id
     return settings
 

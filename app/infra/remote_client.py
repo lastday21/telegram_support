@@ -128,14 +128,14 @@ class RemoteServiceClient:
         payload = {"text": text}
         if self.tg_chat_id:
             payload["chat_id"] = self.tg_chat_id
-        self._post("/v1/telegram/message", json=payload)
+        self._post("/v1/messengers/message", json=payload)
 
     def send_photo(self, photo: bytes, caption: str | None = None) -> None:
         data = {"caption": caption or ""}
         if self.tg_chat_id:
             data["chat_id"] = self.tg_chat_id
         self._post(
-            "/v1/telegram/photo",
+            "/v1/messengers/photo",
             data=data,
             files={"photo": ("screenshot.png", photo, "image/png")},
         )
@@ -155,7 +155,7 @@ class RemoteServiceClient:
             )
             for index, photo in enumerate(photos, start=1)
         ]
-        self._post("/v1/telegram/media-group", data=data, files=files)
+        self._post("/v1/messengers/media-group", data=data, files=files)
 
 
 def build_remote_client(settings: ClientSettings | None = None) -> RemoteServiceClient:

@@ -22,14 +22,21 @@ from app.domain.request_guard import (
     build_request_guard,
 )
 from app.infra.readiness import ExternalReadinessChecker, build_readiness_checker
+from app.infra.dns_fallback import install_dns_fallback
 from app.infra.yandex_resilience import YandexCircuitOpenError
 from app.infra.yandex_gpt import solve_image, solve_text, solve_vision_image
 from app.infra.yandex_ocr import recognize_text
 from app.infra.yandex_stt import transcribe
+from app.interfaces.messengers.sender import (
+    send_media_group as send_messenger_media_group,
+)
+from app.interfaces.messengers.sender import send_message as send_messenger_message
+from app.interfaces.messengers.sender import send_photo as send_messenger_photo
 from app.interfaces.telegram.sender import send_media_group, send_message, send_photo
 from app.settings import SUPPORTED_YC_MODELS, get_settings
 
 logger = logging.getLogger(__name__)
+install_dns_fallback()
 MAX_AUDIO_SIZE = 20 * 1024 * 1024
 MAX_IMAGE_SIZE = 10 * 1024 * 1024
 MAX_CONTEXT_TEXT_SIZE = 120_000
@@ -66,6 +73,15 @@ def create_app(
     send_media_group_fn: Callable[
         [list[bytes], str | None, str | None], None
     ] = send_media_group,
+    send_messenger_message_fn: Callable[
+        [str, str | None], None
+    ] = send_messenger_message,
+    send_messenger_photo_fn: Callable[
+        [bytes, str | None, str | None], None
+    ] = send_messenger_photo,
+    send_messenger_media_group_fn: Callable[
+        [list[bytes], str | None, str | None], None
+    ] = send_messenger_media_group,
     yandex_queue: YandexRequestQueue | None = None,
     readiness_checker: ExternalReadinessChecker | None = None,
     request_guard: RequestGuard | None = None,
@@ -280,6 +296,39 @@ def create_app(
             )
         photo_bytes = [_read_limited(photo, MAX_IMAGE_SIZE) for photo in photos]
         send_media_group_fn(photo_bytes, caption or None, chat_id or None)
+        return {"sent": True}
+
+    @application.post("/v1/messengers/message", dependencies=[Depends(require_access)])
+    def messenger_message(request: MessageRequest) -> dict[str, bool]:
+        send_messenger_message_fn(request.text, request.chat_id)
+        return {"sent": True}
+
+    @application.post("/v1/messengers/photo", dependencies=[Depends(require_access)])
+    def messenger_photo(
+        photo: UploadFile = File(...),
+        caption: str = Form(""),
+        chat_id: str = Form(""),
+    ) -> dict[str, bool]:
+        photo_bytes = _read_limited(photo, MAX_IMAGE_SIZE)
+        send_messenger_photo_fn(photo_bytes, caption or None, chat_id or None)
+        return {"sent": True}
+
+    @application.post(
+        "/v1/messengers/media-group",
+        dependencies=[Depends(require_access)],
+    )
+    def messenger_media_group(
+        photos: list[UploadFile] = File(...),
+        caption: str = Form(""),
+        chat_id: str = Form(""),
+    ) -> dict[str, bool]:
+        if not 2 <= len(photos) <= 10:
+            raise HTTPException(
+                status_code=422,
+                detail="Альбом должен содержать от 2 до 10 снимков",
+            )
+        photo_bytes = [_read_limited(photo, MAX_IMAGE_SIZE) for photo in photos]
+        send_messenger_media_group_fn(photo_bytes, caption or None, chat_id or None)
         return {"sent": True}
 
     return application

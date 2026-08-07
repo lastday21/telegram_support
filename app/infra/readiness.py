@@ -21,6 +21,7 @@ from app.settings import (
 logger = logging.getLogger(__name__)
 YANDEX_MODELS_URL = "https://ai.api.cloud.yandex.net/v1/models"
 TELEGRAM_API_URL = "https://api.telegram.org"
+VK_API_URL = "https://api.vk.com/method"
 
 
 @dataclass(frozen=True)
@@ -77,13 +78,22 @@ class ExternalReadinessChecker:
                 },
             )
 
-        checks = {
+        checks: dict[str, str] = {
             "settings": "ok",
             "yandex": self._check_yandex(settings),
             "telegram": self._check_telegram(settings),
         }
+        if settings.vk_group_token:
+            checks["vk"] = self._check_vk(settings)
+        messenger_checks = [checks["telegram"]]
+        if "vk" in checks:
+            messenger_checks.append(checks["vk"])
         return ReadinessReport(
-            ready=all(state == "ok" for state in checks.values()),
+            ready=(
+                checks["settings"] == "ok"
+                and checks["yandex"] == "ok"
+                and any(state == "ok" for state in messenger_checks)
+            ),
             checks=checks,
         )
 
@@ -95,6 +105,12 @@ class ExternalReadinessChecker:
             raise ValueError("Выбрана неподдерживаемая зрительная модель")
         if not settings.tg_chat_id.lstrip("-").isdigit():
             raise ValueError("Идентификатор чата Telegram должен быть числом")
+
+        if settings.vk_group_token:
+            if not settings.vk_group_id.isdigit():
+                raise ValueError("VK_GROUP_ID должен быть числом")
+            if not settings.vk_user_id.isdigit():
+                raise ValueError("VK_USER_ID должен быть числом")
 
     def _check_yandex(self, settings: Settings) -> str:
         try:
@@ -129,6 +145,30 @@ class ExternalReadinessChecker:
                 raise ValueError("Telegram не подтвердил токен")
         except Exception as exc:
             logger.warning("Telegram недоступен: %s", type(exc).__name__)
+            return "unavailable"
+        return "ok"
+
+    def _check_vk(self, settings: Settings) -> str:
+        try:
+            response = self.http_get(
+                f"{VK_API_URL}/groups.getById",
+                params={
+                    "group_id": settings.vk_group_id,
+                    "access_token": settings.vk_group_token,
+                    "v": settings.vk_api_version,
+                },
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if (
+                not isinstance(payload, dict)
+                or "error" in payload
+                or "response" not in payload
+            ):
+                raise ValueError("ВКонтакте не подтвердил ключ сообщества")
+        except Exception as exc:
+            logger.warning("ВКонтакте недоступен: %s", type(exc).__name__)
             return "unavailable"
         return "ok"
 

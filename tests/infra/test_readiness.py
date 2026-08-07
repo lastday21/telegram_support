@@ -129,3 +129,32 @@ def test_readiness_reports_invalid_telegram_token():
     assert report.ready is False
     assert report.checks["yandex"] == "ok"
     assert report.checks["telegram"] == "unavailable"
+
+
+def test_readiness_stays_available_when_vk_works_without_telegram():
+    configured = replace(
+        _settings(),
+        vk_group_token="VK_TOKEN",
+        vk_group_id="240722997",
+        vk_user_id="114676356",
+    )
+
+    def http_get(url: str, **_kwargs):
+        if url.endswith("/v1/models"):
+            return FakeResponse({"data": []})
+        if url.endswith("/getMe"):
+            return FakeResponse({"ok": False})
+        return FakeResponse({"response": [{"id": 240722997}]})
+
+    report = ExternalReadinessChecker(
+        settings_provider=lambda: configured,
+        http_get=http_get,
+    ).check()
+
+    assert report.ready is True
+    assert report.checks == {
+        "settings": "ok",
+        "yandex": "ok",
+        "telegram": "unavailable",
+        "vk": "ok",
+    }

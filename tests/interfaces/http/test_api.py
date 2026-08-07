@@ -70,6 +70,20 @@ def _build_client(calls: dict) -> TestClient:
             album_caption=caption,
             album_chat_id=chat_id,
         ),
+        send_messenger_message_fn=lambda text, chat_id: calls.update(
+            messenger_message=text,
+            messenger_message_chat_id=chat_id,
+        ),
+        send_messenger_photo_fn=lambda photo, caption, chat_id: calls.update(
+            messenger_photo=photo,
+            messenger_caption=caption,
+            messenger_photo_chat_id=chat_id,
+        ),
+        send_messenger_media_group_fn=lambda photos, caption, chat_id: calls.update(
+            messenger_photos=photos,
+            messenger_album_caption=caption,
+            messenger_album_chat_id=chat_id,
+        ),
         yandex_queue=YandexRequestQueue(),
         readiness_checker=ReadyChecker(),
     )
@@ -278,6 +292,42 @@ def test_telegram_actions_are_proxied():
     assert calls["photos"] == [b"PAGE_1", b"PAGE_2"]
     assert calls["album_caption"] == "Альбом"
     assert calls["album_chat_id"] == "-123456"
+
+
+def test_messenger_actions_are_proxied():
+    calls = {}
+    client = _build_client(calls)
+
+    message_response = client.post(
+        "/v1/messengers/message",
+        headers=AUTH,
+        json={"text": "Сообщение", "chat_id": "123456"},
+    )
+    photo_response = client.post(
+        "/v1/messengers/photo",
+        headers=AUTH,
+        data={"caption": "Подпись", "chat_id": "-123456"},
+        files={"photo": ("screen.png", b"PNG", "image/png")},
+    )
+    album_response = client.post(
+        "/v1/messengers/media-group",
+        headers=AUTH,
+        data={"caption": "Альбом", "chat_id": "-123456"},
+        files=[
+            ("photos", ("page-1.png", b"PAGE_1", "image/png")),
+            ("photos", ("page-2.png", b"PAGE_2", "image/png")),
+        ],
+    )
+
+    assert message_response.json() == {"sent": True}
+    assert photo_response.json() == {"sent": True}
+    assert album_response.json() == {"sent": True}
+    assert calls["messenger_message"] == "Сообщение"
+    assert calls["messenger_message_chat_id"] == "123456"
+    assert calls["messenger_photo"] == b"PNG"
+    assert calls["messenger_caption"] == "Подпись"
+    assert calls["messenger_photos"] == [b"PAGE_1", b"PAGE_2"]
+    assert calls["messenger_album_caption"] == "Альбом"
 
 
 def test_yandex_failure_is_returned_as_bad_gateway_without_internal_details():
