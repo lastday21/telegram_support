@@ -13,6 +13,8 @@ services:
     extra_hosts:
       - "api.telegram.org:149.154.166.110"
       - "llm.api.cloud.yandex.net:158.160.54.160"
+      - "ai.api.cloud.yandex.net:158.160.54.160"
+      - "ocr.api.cloud.yandex.net:158.160.54.160"
       - "api.vk.com:87.240.137.208"
     ports:
       - "${SERVER_BIND_ADDRESS:-127.0.0.1}:${SERVER_PORT:-8000}:8000"

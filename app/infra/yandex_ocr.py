@@ -27,7 +27,7 @@ class YandexOCRClient:
         self,
         api_key: str,
         http_post=requests.post,
-        timeout: int = 60,
+        timeout: int = 20,
         call_policy: YandexCallPolicy = default_yandex_call_policy,
     ) -> None:
         self.http_post = http_post

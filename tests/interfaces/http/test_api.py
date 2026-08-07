@@ -233,6 +233,43 @@ def test_image_context_size_is_limited():
     assert response.status_code == 422
 
 
+def test_image_falls_back_to_vision_model():
+    calls = {}
+
+    def failed_image(
+        _image: bytes,
+        _prompt: str,
+        _context_text: str,
+        _model: str | None,
+    ) -> str:
+        raise RuntimeError("OCR unavailable")
+
+    application = create_app(
+        access_token="SECRET",
+        solve_image_fn=failed_image,
+        solve_vision_image_fn=lambda image, prompt: (
+            calls.update(image=image, prompt=prompt) or "Запасной ответ"
+        ),
+        yandex_queue=YandexRequestQueue(),
+        readiness_checker=ReadyChecker(),
+    )
+    response = TestClient(application).post(
+        "/v1/image",
+        headers=AUTH,
+        data={
+            "prompt": "Реши задачу",
+            "context_text": "Ранее собранный текст",
+        },
+        files={"image": ("screen.png", b"PNG", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"answer": "Запасной ответ"}
+    assert calls["image"] == b"PNG"
+    assert "Реши задачу" in calls["prompt"]
+    assert "Ранее собранный текст" in calls["prompt"]
+
+
 def test_unknown_model_is_rejected():
     client = _build_client({})
 

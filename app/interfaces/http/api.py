@@ -39,6 +39,7 @@ install_dns_fallback()
 MAX_AUDIO_SIZE = 20 * 1024 * 1024
 MAX_IMAGE_SIZE = 10 * 1024 * 1024
 MAX_CONTEXT_TEXT_SIZE = 120_000
+MAX_VISION_FALLBACK_CONTEXT = 30_000
 
 
 class TextRequest(BaseModel):
@@ -197,11 +198,36 @@ def create_app(
             )
         except HTTPException:
             raise
-        except Exception as exc:
-            logger.exception("Не удалось обработать изображение")
-            raise HTTPException(
-                status_code=502, detail="Не удалось обработать изображение"
-            ) from exc
+        except Exception as primary_exc:
+            logger.warning(
+                "Обычная обработка изображения недоступна (%s), "
+                "используется зрительная модель",
+                type(primary_exc).__name__,
+            )
+            fallback_prompt = prompt
+            normalized_context = context_text.strip()
+            if normalized_context:
+                fallback_prompt = (
+                    f"{prompt}\n\n"
+                    "Дополнительный ранее собранный текст:\n"
+                    f"{normalized_context[-MAX_VISION_FALLBACK_CONTEXT:]}"
+                )
+            try:
+                answer = execute_yandex(
+                    solve_vision_image_fn,
+                    image_bytes,
+                    fallback_prompt,
+                )
+            except HTTPException:
+                raise
+            except Exception as fallback_exc:
+                logger.exception(
+                    "Не удалось обработать изображение обычной и зрительной моделями"
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail="Не удалось обработать изображение",
+                ) from fallback_exc
         return {"answer": answer}
 
     @application.post("/v1/vision", dependencies=[Depends(require_access)])

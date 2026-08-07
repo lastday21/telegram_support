@@ -38,7 +38,7 @@ def test_recognize_text_with_bytes():
     assert calls["json"]["languageCodes"] == list(DEFAULT_LANGUAGES)
     assert calls["json"]["model"] == DEFAULT_MODEL
     assert calls["json"]["content"] == base64.b64encode(b"PNG_BYTES").decode("ascii")
-    assert calls["timeout"] == 60
+    assert calls["timeout"] == 20
 
 
 def test_recognize_text_with_path(tmp_path):

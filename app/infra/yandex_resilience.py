@@ -124,7 +124,7 @@ class YandexCallPolicy:
 
 
 def _retry_delays() -> tuple[float, ...]:
-    raw = os.getenv("YANDEX_RETRY_DELAYS", "0.5,1.5")
+    raw = os.getenv("YANDEX_RETRY_DELAYS", "0.5")
     try:
         delays = tuple(
             float(value.strip()) for value in raw.split(",") if value.strip()

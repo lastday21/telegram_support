@@ -47,6 +47,7 @@ def test_solve_text_calls_gpt():
     assert out == "ANSWER"
     assert calls["url"] == API_URL
     assert calls["headers"]["OpenAI-Project"] == "FOLDER"
+    assert calls["timeout"] == 20
     assert calls["json"]["model"] == f"gpt://FOLDER/{DEFAULT_MODEL}"
     assert calls["json"]["messages"][1]["content"] == "How to sort list?"
     assert calls["json"]["messages"][0]["content"] == DEFAULT_SYSTEM
